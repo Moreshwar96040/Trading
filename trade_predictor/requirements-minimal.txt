@@ -1,3 +1,0 @@
-# Absolute minimum to run (uses built-in numpy fallback engine, lower accuracy)
-pandas>=2.0
-numpy>=1.24
