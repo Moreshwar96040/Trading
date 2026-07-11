@@ -1,0 +1,29 @@
+# env / secrets
+.env
+
+# Java
+backend/target/
+*.class
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Node / Angular
+node_modules/
+frontend/dist/
+frontend/.angular/
+
+# IDE
+.idea/workspace.xml
+.idea/tasks.xml
+*.iml.bak
+
+# Logs (transient debug output)
+*.log
+
+# OS
+Thumbs.db
+.DS_Store
