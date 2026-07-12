@@ -252,17 +252,31 @@ class NewsArticle(Base):
 
 class AiInsight(Base):
     """Cached LLM-generated insight per (symbol, kind). Regenerated when the
-    fingerprint of its inputs changes (new articles / refreshed fundamentals)."""
+    fingerprint of its inputs changes (new articles / refreshed fundamentals).
+    symbol_id 0 is the account-level sentinel (e.g. kind=REVIEW), so no FK."""
     __tablename__ = "ai_insights"
 
-    symbol_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("symbols.id", ondelete="CASCADE"),
-                                           primary_key=True)
+    symbol_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     kind: Mapped[str] = mapped_column(String(20), primary_key=True)   # NEWS | FUNDAMENTALS
     content: Mapped[dict] = mapped_column(JSON, nullable=False)
     fingerprint: Mapped[str] = mapped_column(String(120), nullable=False)
     model_name: Mapped[str | None] = mapped_column(String(60))
     generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
                                                           server_default=func.now())
+
+
+class AiUsage(Base):
+    """One row per Anthropic API call: tokens + cost, so the UI can show spend."""
+    __tablename__ = "ai_usage"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    model: Mapped[str] = mapped_column(String(60), nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    cost_usd: Mapped[float] = mapped_column(Numeric(10, 6), nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
+                                                        server_default=func.now())
 
 
 class SyncAudit(Base):

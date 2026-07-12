@@ -11,14 +11,19 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 
 import { JournalEntry } from '../../core/models/market-data.models';
 import { MarketDataService } from '../../core/services/market-data.service';
+import { LeaksReportComponent } from './leaks-report.component';
 
 @Component({
   selector: 'app-journal-page',
   standalone: true,
   imports: [CommonModule, FormsModule, MatCardModule, MatButtonModule, MatFormFieldModule,
-            MatInputModule, MatIconModule, MatSnackBarModule, MatTooltipModule],
+            MatInputModule, MatIconModule, MatSnackBarModule, MatTooltipModule,
+            LeaksReportComponent],
   template: `
     <h2>Trade Journal</h2>
+
+    <!-- ============ what your trades say about your habits ============ -->
+    <app-leaks-report />
 
     <mat-card appearance="outlined" class="editor">
       <h3>{{ editingId() ? 'Edit entry' : 'New entry' }}</h3>

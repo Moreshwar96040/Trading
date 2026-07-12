@@ -8,40 +8,49 @@ import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 
+import { AiUsageSummary } from './core/models/market-data.models';
+import { MarketDataService } from './core/services/market-data.service';
 import { ThemeService } from './core/services/theme.service';
 
 interface NavItem { path: string; icon: string; title: string; }
 interface NavSection { label: string; items: NavItem[]; }
 
+// The nav follows the trading cycle, so the structure itself teaches the workflow:
+// see the tape -> find candidates -> prove the edge -> execute with rules -> learn.
 const NAV_SECTIONS: NavSection[] = [
   {
-    label: 'Overview',
+    label: '1 · Radar',
     items: [
-      { path: '/dashboard', icon: 'space_dashboard', title: 'Trade Desk' },
+      { path: '/dashboard', icon: 'radar', title: 'Trade Desk' },
     ],
   },
   {
-    label: 'Markets',
+    label: '2 · Discover',
     items: [
-      { path: '/chart', icon: 'candlestick_chart', title: 'Charts' },
       { path: '/screener', icon: 'filter_alt', title: 'Screener' },
+      { path: '/ai', icon: 'auto_awesome', title: 'AI Ideas' },
+      { path: '/chart', icon: 'candlestick_chart', title: 'Charts' },
       { path: '/fundamentals', icon: 'account_balance', title: 'Fundamentals' },
     ],
   },
   {
-    label: 'Strategy',
+    label: '3 · Validate',
     items: [
-      { path: '/strategies', icon: 'psychology', title: 'Strategies' },
-      { path: '/ai', icon: 'auto_awesome', title: 'AI Analysis' },
+      { path: '/strategies', icon: 'science', title: 'Strategy Lab' },
     ],
   },
   {
-    label: 'Portfolio',
+    label: '4 · Execute',
     items: [
       { path: '/portfolio', icon: 'account_balance_wallet', title: 'Portfolio' },
       { path: '/risk', icon: 'shield', title: 'Risk' },
       { path: '/alerts', icon: 'notifications', title: 'Alerts' },
-      { path: '/journal', icon: 'menu_book', title: 'Journal' },
+    ],
+  },
+  {
+    label: '5 · Review',
+    items: [
+      { path: '/journal', icon: 'menu_book', title: 'Journal & Leaks' },
     ],
   },
 ];
@@ -63,6 +72,13 @@ const NAV_SECTIONS: NavSection[] = [
         <span class="dot"></span>
         {{ marketOpen() ? 'Market open' : 'Market closed' }}
       </div>
+      @if (aiUsage(); as u) {
+        <div class="ai-spend" [matTooltip]="aiSpendTooltip()">
+          <mat-icon>auto_awesome</mat-icon>
+          ₹{{ u.month.cost_inr | number: '1.2-2' }}
+          <span class="ai-spend-label">AI this month</span>
+        </div>
+      }
       <span class="clock">{{ istNow() | date: 'HH:mm:ss' }} IST</span>
       <button mat-icon-button (click)="theme.toggle()"
               [matTooltip]="theme.mode() === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'">
@@ -144,6 +160,16 @@ const NAV_SECTIONS: NavSection[] = [
     }
     .clock { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
+    .ai-spend {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; font-weight: 700; color: var(--accent-2);
+      padding: 5px 12px; border-radius: 999px; cursor: default;
+      border: 1px solid rgba(129, 140, 248, 0.35); background: rgba(129, 140, 248, 0.08);
+      font-variant-numeric: tabular-nums;
+    }
+    .ai-spend mat-icon { font-size: 15px; width: 15px; height: 15px; }
+    .ai-spend-label { font-weight: 500; color: var(--text-dim); font-size: 11px; }
+
     .container { flex: 1; }
     .sidenav {
       width: 216px;
@@ -181,8 +207,10 @@ const NAV_SECTIONS: NavSection[] = [
 })
 export class AppComponent {
   readonly theme = inject(ThemeService);
+  private readonly api = inject(MarketDataService);
   readonly sections = NAV_SECTIONS;
   readonly istNow = signal(this.computeIst());
+  readonly aiUsage = signal<AiUsageSummary | null>(null);
   readonly marketOpen = computed(() => {
     const now = this.istNow();
     const day = now.getDay();                            // shifted date: getters read IST wall time
@@ -192,7 +220,26 @@ export class AppComponent {
 
   constructor() {
     const timer = setInterval(() => this.istNow.set(this.computeIst()), 1000);
-    inject(DestroyRef).onDestroy(() => clearInterval(timer));
+    const loadUsage = () => this.api.getAiUsage().subscribe({
+      next: (u) => this.aiUsage.set(u),
+      error: () => this.aiUsage.set(null),   // endpoint down — vanish quietly
+    });
+    loadUsage();
+    const usageTimer = setInterval(loadUsage, 120_000);   // refresh every 2 min
+    inject(DestroyRef).onDestroy(() => { clearInterval(timer); clearInterval(usageTimer); });
+  }
+
+  aiSpendTooltip(): string {
+    const u = this.aiUsage();
+    if (!u) return '';
+    if (u.total.calls === 0) {
+      return 'No AI calls recorded yet — insights are cached, so you only pay when data changes';
+    }
+    const kinds = u.by_kind.map((k) => `${k.kind.toLowerCase()}: ₹${k.cost_inr}`).join(' · ');
+    return `${u.month.calls} AI calls this month `
+      + `(${((u.month.input_tokens + u.month.output_tokens) / 1000).toFixed(1)}K tokens)`
+      + (kinds ? ` — ${kinds}` : '')
+      + ` · all-time ₹${u.total.cost_inr} ($${u.total.cost_usd})`;
   }
 
   /** Wall-clock time in IST encoded as a local Date (safe for date pipe + getters). */

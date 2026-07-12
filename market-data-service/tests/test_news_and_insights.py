@@ -74,7 +74,7 @@ def test_insight_cache_hit_and_invalidation(session: Session, reliance: Symbol,
     settings = Settings(anthropic_api_key="test-key")
     calls = {"n": 0}
 
-    def fake_call(_settings, _system, _user):
+    def fake_call(*_args, **_kwargs):
         calls["n"] += 1
         return '{"summary": "fine", "sentiment": "neutral"}'
 
@@ -101,7 +101,7 @@ def test_fundamentals_insight_caches_by_computed_at(session: Session, reliance: 
     settings = Settings(anthropic_api_key="test-key")
     calls = {"n": 0}
 
-    def fake_call(_settings, _system, _user):
+    def fake_call(*_args, **_kwargs):
         calls["n"] += 1
         return '{"headline": "solid", "verdict": "good"}'
 
@@ -122,11 +122,30 @@ def test_fundamentals_insight_caches_by_computed_at(session: Session, reliance: 
     assert third["cached"] is False and calls["n"] == 2
 
 
+def test_record_usage_computes_cost(session: Session):
+    from app.models import AiUsage
+
+    settings = Settings(anthropic_api_key="k", anthropic_price_input_per_mtok=1.0,
+                        anthropic_price_output_per_mtok=5.0)
+    narrator._record_usage(session, settings, "NEWS",
+                           {"input_tokens": 1_000_000, "output_tokens": 200_000})
+    row = session.query(AiUsage).one()
+    assert row.kind == "NEWS"
+    assert float(row.cost_usd) == 2.0        # 1.0 + 0.2M * 5
+    assert row.input_tokens == 1_000_000
+
+
+def test_record_usage_never_raises(session: Session):
+    settings = Settings(anthropic_api_key="k")
+    narrator._record_usage(session, settings, "NEWS", {"input_tokens": "garbage"})
+    # bad data logged and swallowed — insights must not break on tracking
+
+
 def test_llm_error_is_reported_not_raised(session: Session, reliance: Symbol,
                                           monkeypatch):
     settings = Settings(anthropic_api_key="test-key")
 
-    def boom(_settings, _system, _user):
+    def boom(*_args, **_kwargs):
         raise narrator.LlmError("API down")
 
     monkeypatch.setattr(narrator, "_call_claude", boom)

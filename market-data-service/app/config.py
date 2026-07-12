@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-haiku-4-5"
     anthropic_max_tokens: int = 1000
     news_max_articles: int = 12             # per symbol, per fetch
+    # $/million tokens for cost tracking (match your model's price card)
+    anthropic_price_input_per_mtok: float = 1.0
+    anthropic_price_output_per_mtok: float = 5.0
+    usd_to_inr: float = 84.0                # for the ₹ display in the UI
 
     # --- scheduler ---
     scheduler_enabled: bool = True

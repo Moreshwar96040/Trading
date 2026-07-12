@@ -157,6 +157,96 @@ export interface BacktestMetrics {
   avg_loss: number | null;
   final_equity: number;
   data_coverage_note?: string;
+  robustness?: RobustnessReport;
+}
+
+export interface RobustnessReport {
+  score: number;
+  verdict: 'ROBUST' | 'PROMISING' | 'FRAGILE' | 'OVERFIT_RISK';
+  components: { sample_size: number; monte_carlo: number; holdout: number };
+  reasons: string[];
+  monte_carlo: {
+    resamples: number;
+    return_p5: number; return_p25: number; return_p50: number;
+    return_p75: number; return_p95: number;
+    drawdown_p50: number; drawdown_p95: number;
+    prob_loss_pct: number;
+    histogram: { min: number; max: number; counts: number[] };
+  } | null;
+  holdout: {
+    in_sample_return_pct: number | null;
+    out_sample_return_pct: number | null;
+    in_sample_trades: number;
+    out_sample_trades: number;
+  } | null;
+}
+
+export interface RegimeInfo {
+  status: 'OK' | 'NO_DATA';
+  regime?: 'RISK_ON' | 'PULLBACK' | 'CHOP' | 'BEAR_RALLY' | 'RISK_OFF';
+  label?: string;
+  guidance?: string;
+  volatility?: 'LOW' | 'NORMAL' | 'HIGH' | null;
+  breadth?: {
+    pct_above_sma200: number;
+    pct_above_sma50: number;
+    avg_rsi: number | null;
+    avg_atr_pct: number | null;
+    avg_return_1m_pct: number | null;
+    symbols: number;
+  };
+  as_of?: string;
+  note?: string;
+}
+
+export interface AiUsageBucket {
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  cost_inr: number;
+}
+
+export interface AiUsageSummary {
+  month: AiUsageBucket;
+  total: AiUsageBucket;
+  by_kind: ({ kind: string } & AiUsageBucket)[];
+  usd_to_inr: number;
+}
+
+export interface LeakItem {
+  kind: string;
+  count: number;
+  severity: 'high' | 'medium' | 'low';
+  text: string;
+}
+
+export interface LeaksReport {
+  status: 'OK' | 'NO_TRADES';
+  note?: string;
+  orders?: number;
+  closed_trades?: number;
+  stats?: {
+    total_pnl: number;
+    expectancy_per_trade: number | null;
+    win_rate_pct: number | null;
+    avg_win: number | null;
+    avg_loss: number | null;
+    payoff_ratio: number | null;
+  };
+  by_weekday?: { day: string; trades: number; pnl: number }[];
+  leaks?: LeakItem[];
+  journal_coverage_pct?: number | null;
+  narrative?: {
+    insight?: {
+      headline?: string;
+      habits_working?: string[];
+      habits_costing_you?: string[];
+      one_change?: string;
+    };
+    error?: string;
+    cached?: boolean;
+  } | null;
 }
 
 export interface BacktestTradeRow {

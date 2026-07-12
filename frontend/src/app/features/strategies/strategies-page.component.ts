@@ -21,6 +21,9 @@ import {
 } from '../../core/models/market-data.models';
 import { MarketDataService } from '../../core/services/market-data.service';
 import { EquityChartComponent } from './equity-chart.component';
+import { RobustnessPanelComponent } from './robustness-panel.component';
+import { TradeSignalDialogComponent } from './trade-signal-dialog.component';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { STRATEGY_PRESETS, StrategyPreset } from './strategy-presets';
 
 const SERIES_HINTS = ['close', 'open', 'high', 'low', 'volume', 'sma_20', 'sma_50',
@@ -38,8 +41,9 @@ interface RuleDraft { left: string; op: string; right: string; }
   standalone: true,
   imports: [CommonModule, FormsModule, MatCardModule, MatListModule, MatButtonModule,
             MatIconModule, MatFormFieldModule, MatInputModule, MatSelectModule,
-            MatCheckboxModule, MatDatepickerModule, MatTableModule, MatProgressSpinnerModule,
-            MatSnackBarModule, MatTooltipModule, EquityChartComponent],
+            MatCheckboxModule, MatDatepickerModule, MatDialogModule, MatTableModule,
+            MatProgressSpinnerModule, MatSnackBarModule, MatTooltipModule,
+            EquityChartComponent, RobustnessPanelComponent],
   providers: [provideNativeDateAdapter()],
   template: `
     <!-- ============ live signals ============ -->
@@ -315,6 +319,10 @@ interface RuleDraft { left: string; op: string; right: string; }
           </mat-card>
         </div>
 
+        @if (m.robustness) {
+          <app-robustness-panel [report]="m.robustness" />
+        }
+
         @if (r.equityCurve?.length) {
           <mat-card appearance="outlined" class="chart-card">
             <app-equity-chart [points]="r.equityCurve!" />
@@ -409,6 +417,7 @@ interface RuleDraft { left: string; op: string; right: string; }
 export class StrategiesPageComponent implements OnInit {
   private readonly api = inject(MarketDataService);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly dialog = inject(MatDialog);
 
   readonly seriesHints = SERIES_HINTS;
   readonly ops = OPS;
@@ -471,51 +480,14 @@ export class StrategiesPageComponent implements OnInit {
 
   /** One-click: adaptive risk plan -> position size -> paper order tagged with the strategy. */
   tradeSignal(sig: SignalInfo): void {
-    this.busy.set(true);
-    this.api.getAiRisk(sig.ticker).subscribe({
-      next: (risk) => {
-        this.api.calcPositionSize(risk.as_of_price, risk.stop_price).subscribe({
-          next: (size) => {
-            if (size.quantity < 1) {
-              this.busy.set(false);
-              this.snackBar.open('Risk sizing produced 0 shares — check risk settings', 'Dismiss',
-                                 { duration: 6000 });
-              return;
-            }
-            this.api.placePaperOrder(sig.ticker, 'BUY', size.quantity, {
-              strategyId: sig.strategyId,
-              stopPrice: risk.stop_price,
-              targetPrice: risk.take_profit_price,
-            }).subscribe({
-              next: (order) => {
-                this.busy.set(false);
-                if (order.status === 'FILLED') {
-                  this.snackBar.open(
-                    `Bought ${order.quantity} ${sig.ticker} @ ₹${order.price} · stop ₹${risk.stop_price}` +
-                    (risk.take_profit_price ? ` · target ₹${risk.take_profit_price}` : ' · trailing'),
-                    undefined, { duration: 6000 });
-                } else {
-                  this.snackBar.open(`Order rejected: ${order.rejectReason}`, 'Dismiss',
-                                     { duration: 6000 });
-                }
-              },
-              error: (err) => {
-                this.busy.set(false);
-                this.snackBar.open(err?.error?.message ?? 'Order failed', 'Dismiss', { duration: 6000 });
-              },
-            });
-          },
-          error: () => {
-            this.busy.set(false);
-            this.snackBar.open('Position sizing failed', 'Dismiss', { duration: 5000 });
-          },
-        });
-      },
-      error: () => {
-        this.busy.set(false);
-        this.snackBar.open('Adaptive risk service unavailable', 'Dismiss', { duration: 5000 });
-      },
-    });
+    // Discipline gate: pre-flight checklist + written reason -> order + journal entry.
+    this.dialog.open(TradeSignalDialogComponent, { data: { signal: sig }, autoFocus: false })
+      .afterClosed().subscribe((result) => {
+        if (result?.message) {
+          this.snackBar.open(result.message, result.placed ? undefined : 'Dismiss',
+                             { duration: 6000 });
+        }
+      });
   }
 
   selectedPreset(): StrategyPreset | undefined {

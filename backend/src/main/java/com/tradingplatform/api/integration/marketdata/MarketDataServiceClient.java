@@ -122,6 +122,33 @@ public class MarketDataServiceClient {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getRegime() {
+        try {
+            return http.get().uri("/internal/regime").retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Regime service unavailable", ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getAiUsage() {
+        try {
+            return http.get().uri("/internal/ai/usage").retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("AI usage service unavailable", ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getLeaksReport() {
+        try {
+            return http.get().uri("/internal/review/leaks").retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Review service unavailable", ex);
+        }
+    }
+
     /** Symbol metadata returned after seeding from Yahoo Finance. */
     public record SymbolSeedResult(Long id, String ticker, String name, String sector,
                                    String exchange, String currency, String yahooSymbol,

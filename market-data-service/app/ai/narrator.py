@@ -54,7 +54,8 @@ def llm_enabled(settings: Settings) -> bool:
     return bool(settings.anthropic_api_key)
 
 
-def _call_claude(settings: Settings, system: str, user: str) -> str:
+def _call_claude(settings: Settings, system: str, user: str,
+                 session: Session | None = None, kind: str = "GENERIC") -> str:
     resp = httpx.post(
         API_URL,
         headers={"x-api-key": settings.anthropic_api_key,
@@ -67,8 +68,28 @@ def _call_claude(settings: Settings, system: str, user: str) -> str:
         timeout=45.0)
     if resp.status_code != 200:
         raise LlmError(f"Anthropic API {resp.status_code}: {resp.text[:300]}")
-    parts = resp.json().get("content", [])
+    body = resp.json()
+    if session is not None:
+        _record_usage(session, settings, kind, body.get("usage") or {})
+    parts = body.get("content", [])
     return "".join(p.get("text", "") for p in parts if p.get("type") == "text")
+
+
+def _record_usage(session: Session, settings: Settings, kind: str, usage: dict) -> None:
+    """Best-effort usage log — a tracking failure must never break an insight."""
+    from app.models import AiUsage
+    try:
+        inp = int(usage.get("input_tokens") or 0)
+        out = int(usage.get("output_tokens") or 0)
+        cost = (inp * settings.anthropic_price_input_per_mtok
+                + out * settings.anthropic_price_output_per_mtok) / 1_000_000
+        session.add(AiUsage(kind=kind, model=settings.anthropic_model,
+                            input_tokens=inp, output_tokens=out,
+                            cost_usd=round(cost, 6)))
+        session.commit()
+    except Exception:                               # noqa: BLE001
+        log.warning("Could not record AI usage", exc_info=True)
+        session.rollback()
 
 
 def _parse_json(text: str) -> dict:
@@ -120,7 +141,8 @@ def news_insight(session: Session, settings: Settings, symbol: Symbol,
     user = (f"Stock: {symbol.name} ({symbol.ticker}, NSE)\n"
             f"Recent headlines, newest first:\n" + "\n".join(lines))
     try:
-        content = _parse_json(_call_claude(settings, NEWS_SYSTEM, user))
+        content = _parse_json(_call_claude(settings, NEWS_SYSTEM, user,
+                                           session=session, kind="NEWS"))
     except (LlmError, json.JSONDecodeError, httpx.HTTPError) as exc:
         log.error("News insight failed for %s: %s", symbol.ticker, exc)
         return {"error": str(exc)}
@@ -148,7 +170,8 @@ def fundamentals_insight(session: Session, settings: Settings, symbol: Symbol,
             + (f"Recent statements: {json.dumps(statement_rows, default=str)}"
                if statement_rows else ""))
     try:
-        content = _parse_json(_call_claude(settings, FUNDAMENTALS_SYSTEM, user))
+        content = _parse_json(_call_claude(settings, FUNDAMENTALS_SYSTEM, user,
+                                           session=session, kind="FUNDAMENTALS"))
     except (LlmError, json.JSONDecodeError, httpx.HTTPError) as exc:
         log.error("Fundamentals insight failed for %s: %s", symbol.ticker, exc)
         return {"error": str(exc)}

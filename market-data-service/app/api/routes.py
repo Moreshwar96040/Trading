@@ -195,6 +195,56 @@ def fundamentals_insights(ticker: str,
                                             statement_rows)}
 
 
+@router.get("/internal/regime")
+def market_regime(session: Session = Depends(get_session)) -> dict:
+    """Breadth-based market regime (computed from the screener snapshot)."""
+    from app.services.regime_service import compute_regime
+    return compute_regime(session)
+
+
+@router.get("/internal/review/leaks")
+def review_leaks(session: Session = Depends(get_session),
+                 settings: Settings = Depends(get_settings)) -> dict:
+    """Trading-habit analytics over the paper order log + optional AI coach read."""
+    from app.services.review_service import compute_leaks, leaks_narrative
+    data = compute_leaks(session)
+    data["narrative"] = leaks_narrative(session, settings, data)
+    return data
+
+
+@router.get("/internal/ai/usage")
+def ai_usage(session: Session = Depends(get_session),
+             settings: Settings = Depends(get_settings)) -> dict:
+    """What the LLM insights have cost: this calendar month + all time + by kind."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import func as sqlfunc
+
+    from app.models import AiUsage
+
+    month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0,
+                                                     second=0, microsecond=0)
+
+    def summarize(rows) -> dict:
+        calls, inp, out, usd = rows or (0, 0, 0, 0.0)
+        usd = float(usd or 0.0)
+        return {"calls": int(calls or 0), "input_tokens": int(inp or 0),
+                "output_tokens": int(out or 0), "cost_usd": round(usd, 4),
+                "cost_inr": round(usd * settings.usd_to_inr, 2)}
+
+    agg = (sqlfunc.count(AiUsage.id), sqlfunc.sum(AiUsage.input_tokens),
+           sqlfunc.sum(AiUsage.output_tokens), sqlfunc.sum(AiUsage.cost_usd))
+    month = session.execute(select(*agg).where(AiUsage.created_at >= month_start)).one()
+    total = session.execute(select(*agg)).one()
+    by_kind = session.execute(
+        select(AiUsage.kind, *agg).where(AiUsage.created_at >= month_start)
+        .group_by(AiUsage.kind)).all()
+
+    return {"month": summarize(month), "total": summarize(total),
+            "by_kind": [{"kind": r[0], **summarize(r[1:])} for r in by_kind],
+            "usd_to_inr": settings.usd_to_inr}
+
+
 @router.post("/internal/ai/train")
 def ai_train(body: SyncRequest, session: Session = Depends(get_session)) -> dict:
     try:

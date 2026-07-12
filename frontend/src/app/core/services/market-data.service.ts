@@ -4,9 +4,10 @@ import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import {
-  AiPredictionRow, AiRiskPlan, AlertInfo, BacktestDetail, BacktestRunParams, CandleSeries,
-  FundamentalsData, IndicatorSeries, InsightResponse, JournalEntry, NewsResponse,
-  PaperAccount, PaperOrder,
+  AiPredictionRow, AiRiskPlan, AiUsageSummary, AlertInfo, BacktestDetail,
+  BacktestRunParams, CandleSeries,
+  FundamentalsData, IndicatorSeries, InsightResponse, JournalEntry, LeaksReport,
+  NewsResponse, PaperAccount, PaperOrder, RegimeInfo,
   PositionSizeResult, Quote, RiskReport, RiskSettings, ScreenRequest, ScreenRow,
   ScreenerFieldsMeta, SignalInfo, StrategyDefinition, StrategyInfo, StrategyScore,
   SymbolInfo, TradeIdeasResponse,
@@ -230,5 +231,17 @@ export class MarketDataService {
 
   getFundamentalsInsights(ticker: string): Observable<InsightResponse> {
     return this.http.get<InsightResponse>(`${this.base}/fundamentals/${ticker}/insights`);
+  }
+
+  getRegime(): Observable<RegimeInfo> {
+    return this.http.get<RegimeInfo>(`${this.base}/regime`);
+  }
+
+  getLeaksReport(): Observable<LeaksReport> {
+    return this.http.get<LeaksReport>(`${this.base}/review/leaks`);
+  }
+
+  getAiUsage(): Observable<AiUsageSummary> {
+    return this.http.get<AiUsageSummary>(`${this.base}/ai/usage`);
   }
 }

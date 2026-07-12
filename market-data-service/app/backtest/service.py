@@ -69,6 +69,39 @@ def validate_definition(definition: dict) -> list[str]:
     return problems
 
 
+def _robustness_check(data: dict, definition: dict, engine_params, result) -> dict:
+    """Overfitting guard: Monte Carlo the trades + re-run on a 70/30 date split."""
+    from app.backtest.robustness import (HoldoutComparison, monte_carlo,
+                                         robustness_score)
+
+    closed = [t for t in result.trades if t.pnl_pct is not None]
+    mc = monte_carlo([float(t.pnl_pct) for t in closed])
+
+    holdout = None
+    all_dates = sorted({d for df in data.values() for d in df.index})
+    if len(all_dates) >= 60:                       # need something to split
+        cut = all_dates[int(len(all_dates) * 0.7)]
+        data_is = {t: df[df.index < cut] for t, df in data.items()}
+        data_oos = {t: df[df.index >= cut] for t, df in data.items()}
+        data_is = {t: df for t, df in data_is.items() if len(df) >= MIN_BARS}
+        data_oos = {t: df for t, df in data_oos.items() if len(df) >= MIN_BARS}
+        if data_is and data_oos:
+            exit_rules = definition.get("exit") or []
+            res_is = run_backtest(data_is, definition["entry"], exit_rules, engine_params)
+            res_oos = run_backtest(data_oos, definition["entry"], exit_rules, engine_params)
+            m_is = compute_metrics(res_is.equity_curve, res_is.trades,
+                                   engine_params.initial_capital)
+            m_oos = compute_metrics(res_oos.equity_curve, res_oos.trades,
+                                    engine_params.initial_capital)
+            holdout = HoldoutComparison(
+                in_sample_return_pct=m_is.get("total_return_pct"),
+                out_sample_return_pct=m_oos.get("total_return_pct"),
+                in_sample_trades=m_is.get("trades", 0),
+                out_sample_trades=m_oos.get("trades", 0))
+
+    return robustness_score(len(closed), mc, holdout)
+
+
 def run_and_persist(session: Session, strategy_id: int, params: dict) -> dict:
     strategy = session.get(Strategy, strategy_id)
     if strategy is None:
@@ -163,6 +196,8 @@ def _execute(session: Session, strategy: Strategy, record: Backtest, params: dic
                               engine_params.initial_capital)
     if data_coverage_note:
         metrics["data_coverage_note"] = data_coverage_note
+
+    metrics["robustness"] = _robustness_check(data, definition, engine_params, result)
 
     record.status = "SUCCESS"
     record.finished_at = datetime.now(timezone.utc)
