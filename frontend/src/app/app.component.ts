@@ -39,6 +39,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: '3 · Validate',
     items: [
       { path: '/strategies', icon: 'science', title: 'Strategy Lab' },
+      { path: '/alpha', icon: 'layers', title: 'Alpha Stack' },
     ],
   },
   {

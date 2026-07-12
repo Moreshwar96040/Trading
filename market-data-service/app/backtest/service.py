@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.backtest.engine import BacktestParams, run_backtest
 from app.backtest.metrics import compute_metrics
 from app.backtest.rules import validate_rules
-from app.models import Backtest, BacktestTrade, OhlcvDaily, Strategy, Symbol
+from app.models import Backtest, BacktestTrade, Fundamentals, OhlcvDaily, Strategy, Symbol
 from app.services.indicator_service import load_ohlcv
 
 log = logging.getLogger(__name__)
@@ -143,6 +143,14 @@ def _execute(session: Session, strategy: Strategy, record: Backtest, params: dic
     if not symbols:
         raise ValueError("No matching symbols")
 
+    # Fundamental rule operands ("roe_pct gt 15") are injected as constant columns
+    # holding the CURRENT stored value — a quality filter over which symbols trade,
+    # not a historical series. Symbols without stored fundamentals are skipped.
+    from app.backtest.rules import fundamental_fields_used
+    fundamental_fields = (fundamental_fields_used(definition.get("entry"))
+                          | fundamental_fields_used(definition.get("exit")))
+    skipped_no_fundamentals: list[str] = []
+
     data = {}
     earliest_stored: date | None = None
     for sym in symbols:
@@ -157,6 +165,14 @@ def _execute(session: Session, strategy: Strategy, record: Backtest, params: dic
         frame = resample_ohlcv(df.set_index("trade_date"), timeframe)
         if len(frame) < MIN_BARS:
             continue
+        if fundamental_fields:
+            fundamentals = session.get(Fundamentals, sym.id)
+            values = {f: getattr(fundamentals, f, None) for f in fundamental_fields} \
+                if fundamentals is not None else {}
+            if any(v is None for v in values.values()) or not values:
+                skipped_no_fundamentals.append(sym.ticker)
+                continue
+            frame = frame.assign(**{f: float(v) for f, v in values.items()})
         data[sym.ticker] = frame
     if not data:
         if earliest_stored is not None and from_date is not None:
@@ -178,6 +194,12 @@ def _execute(session: Session, strategy: Strategy, record: Backtest, params: dic
             f"to {earliest_stored.isoformat()} — the backtest ran on {earliest_stored.isoformat()}"
             f".. instead. Run a sync with a longer lookback to backfill further."
         )
+    if fundamental_fields:
+        note = (f"Fundamental filters ({', '.join(sorted(fundamental_fields))}) use TODAY'S "
+                "stored ratios across all past bars — a quality screen, not point-in-time data."
+                + (f" Skipped (no fundamentals): {', '.join(skipped_no_fundamentals)}."
+                   if skipped_no_fundamentals else ""))
+        data_coverage_note = f"{data_coverage_note} {note}" if data_coverage_note else note
 
     engine_params = BacktestParams(
         initial_capital=float(params.get("initial_capital", 1_000_000)),

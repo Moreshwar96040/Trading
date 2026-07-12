@@ -56,6 +56,21 @@ def _run_fundamentals_job() -> None:
         session.close()
 
 
+def _run_briefing_job() -> None:
+    """Warm today's briefing before the open so it's cached when the app loads."""
+    from app.services.briefing_service import build_briefing
+    settings = get_settings()
+    session = session_factory()()
+    try:
+        result = build_briefing(session, settings, force=True)
+        log.info("Morning briefing generated (narrative: %s)",
+                 "yes" if result.get("narrative") else "disabled")
+    except Exception:
+        log.exception("Morning briefing crashed")
+    finally:
+        session.close()
+
+
 def start_scheduler() -> BackgroundScheduler | None:
     settings = get_settings()
     if not settings.scheduler_enabled:
@@ -69,7 +84,12 @@ def start_scheduler() -> BackgroundScheduler | None:
                       CronTrigger.from_crontab(settings.fundamentals_cron,
                                                timezone=settings.timezone),
                       id="weekly_fundamentals", replace_existing=True)
+    scheduler.add_job(_run_briefing_job,
+                      CronTrigger.from_crontab(settings.briefing_cron,
+                                               timezone=settings.timezone),
+                      id="morning_briefing", replace_existing=True)
     scheduler.start()
-    log.info("Scheduler started: daily sync '%s', fundamentals '%s' (%s)",
-             settings.sync_cron, settings.fundamentals_cron, settings.timezone)
+    log.info("Scheduler started: daily sync '%s', fundamentals '%s', briefing '%s' (%s)",
+             settings.sync_cron, settings.fundamentals_cron, settings.briefing_cron,
+             settings.timezone)
     return scheduler

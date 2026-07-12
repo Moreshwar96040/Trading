@@ -30,6 +30,17 @@ public class PaperTradingController {
         this.management = management;
     }
 
+    /** POST /api/v1/paper/positions/RELIANCE/stop  body: {"stopPrice": 2890.5}
+     *  Guardian one-click action: move a position's stop. */
+    @PostMapping("/positions/{ticker}/stop")
+    public Map<String, Object> updateStop(
+            @org.springframework.web.bind.annotation.PathVariable String ticker,
+            @RequestBody Map<String, Object> body) {
+        Object raw = body == null ? null : body.get("stopPrice");
+        java.math.BigDecimal stop = raw == null ? null : new java.math.BigDecimal(raw.toString());
+        return paperTrading.updateStop(ticker, stop);
+    }
+
     /** AI position management: ratchet trailing stops; alert or (opt-in) exit on
      *  stop/target hits. body (optional): {"autoExit": true} */
     @PostMapping("/manage")

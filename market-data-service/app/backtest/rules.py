@@ -21,6 +21,13 @@ _BB_NAMES = {"bb_upper", "bb_mid", "bb_lower"}
 _ICHIMOKU_NAMES = {"ichimoku_tenkan", "ichimoku_kijun", "ichimoku_senkou_a",
                    "ichimoku_senkou_b", "ichimoku_cloud_top", "ichimoku_cloud_bottom"}
 _SR_NAMES = {"support", "resistance"}
+#: Fundamental ratios usable as rule operands (e.g. "roe_pct gt 15"). They are
+#: injected by the backtest service as constant columns holding the CURRENT
+#: stored value — a quality filter, not a time series (mild lookahead bias,
+#: surfaced to the user as a coverage note).
+FUNDAMENTAL_FIELDS = {"roe_pct", "pe_trailing", "pe_forward", "pb", "ps",
+                      "debt_to_equity", "profit_margin_pct", "operating_margin_pct",
+                      "revenue_growth_pct", "earnings_growth_pct", "dividend_yield_pct"}
 
 
 class RuleError(ValueError):
@@ -30,7 +37,18 @@ class RuleError(ValueError):
 def is_valid_series(name: str) -> bool:
     return (name in _PRICE_COLUMNS or name in _MACD_NAMES or name in _BB_NAMES
             or name in _ICHIMOKU_NAMES or name in _SR_NAMES
+            or name in FUNDAMENTAL_FIELDS
             or _PARAM_PATTERN.match(name) is not None)
+
+
+def fundamental_fields_used(rules: list[dict]) -> set[str]:
+    """Which fundamental fields appear in a rule list (left or right operands)."""
+    used: set[str] = set()
+    for rule in rules or []:
+        for operand in (rule.get("left"), rule.get("right")):
+            if isinstance(operand, str) and operand in FUNDAMENTAL_FIELDS:
+                used.add(operand)
+    return used
 
 
 def validate_rules(rules: list[dict]) -> list[str]:
@@ -61,6 +79,11 @@ def resolve_series(df: pd.DataFrame, name: str) -> pd.Series:
     """Resolve a series name against an OHLCV frame (columns open/high/low/close/volume)."""
     if name in _PRICE_COLUMNS:
         return df[name].astype(float)
+    if name in FUNDAMENTAL_FIELDS:
+        if name in df.columns:
+            return df[name].astype(float)
+        raise RuleError(f"'{name}' needs stored fundamentals for this symbol — "
+                        "refresh fundamentals first (POST /api/v1/sync/fundamentals)")
     match = _PARAM_PATTERN.match(name)
     if match:
         kind, period = match.group(1), int(match.group(2))

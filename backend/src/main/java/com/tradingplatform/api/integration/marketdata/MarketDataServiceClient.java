@@ -141,6 +141,42 @@ public class MarketDataServiceClient {
     }
 
     @SuppressWarnings("unchecked")
+    public Map<String, Object> getAlphaStack(String ticker) {
+        try {
+            return http.get()
+                    .uri(uriBuilder -> {
+                        var b = uriBuilder.path("/internal/alpha/stack");
+                        if (ticker != null && !ticker.isBlank()) b = b.queryParam("ticker", ticker);
+                        return b.build();
+                    })
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Alpha stack service unavailable", ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getPortfolioHealth() {
+        try {
+            return http.get().uri("/internal/portfolio/health").retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Guardian service unavailable", ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getBriefing(boolean force) {
+        try {
+            return http.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/briefing")
+                            .queryParam("force", force).build())
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Briefing service unavailable", ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
     public Map<String, Object> getLeaksReport() {
         try {
             return http.get().uri("/internal/review/leaks").retrieve().body(Map.class);

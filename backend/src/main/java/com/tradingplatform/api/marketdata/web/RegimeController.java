@@ -34,4 +34,26 @@ public class RegimeController {
     public Map<String, Object> aiUsage() {
         return marketData.getAiUsage();
     }
+
+    /** GET /api/v1/alpha/stack?ticker= — conviction-ranked live setups. */
+    @GetMapping("/alpha/stack")
+    public Map<String, Object> alphaStack(
+            @org.springframework.web.bind.annotation.RequestParam(required = false)
+            String ticker) {
+        return marketData.getAlphaStack(ticker);
+    }
+
+    /** GET /api/v1/portfolio/health — Position Guardian action queue. */
+    @GetMapping("/portfolio/health")
+    public Map<String, Object> portfolioHealth() {
+        return marketData.getPortfolioHealth();
+    }
+
+    /** GET /api/v1/briefing — the morning AI briefing (cached per day). */
+    @GetMapping("/briefing")
+    public Map<String, Object> briefing(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "false")
+            boolean force) {
+        return marketData.getBriefing(force);
+    }
 }

@@ -219,6 +219,28 @@ public class PaperTradingService {
         return getAccount();
     }
 
+    /** Position Guardian action: ratchet a position's stop (typically upward per ATR). */
+    @Transactional
+    public Map<String, Object> updateStop(String ticker, BigDecimal stopPrice) {
+        if (stopPrice == null || stopPrice.signum() <= 0) {
+            throw new BadRequestException("stopPrice must be a positive number");
+        }
+        PaperAccount account = defaultAccount();
+        Symbol symbol = symbolService.getByTicker(ticker);
+        PaperPosition position = positions
+                .findByAccountIdAndSymbolId(account.getId(), symbol.getId())
+                .filter(p -> p.getQuantity() > 0)
+                .orElseThrow(() -> new NotFoundException("No open position in " + ticker));
+        BigDecimal oldStop = position.getStopPrice();
+        position.applyRiskPlan(null, stopPrice, null);
+        positions.save(position);
+        Map<String, Object> result = new HashMap<>();
+        result.put("ticker", symbol.getTicker());
+        result.put("oldStop", oldStop);
+        result.put("newStop", stopPrice);
+        return result;
+    }
+
     // ---------------------------------------------------------------- helpers
     private BigDecimal bookValueOfPositions(Long accountId) {
         return positions.findByAccountIdAndQuantityGreaterThan(accountId, 0).stream()

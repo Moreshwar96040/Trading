@@ -10,6 +10,8 @@ import {
   AlertInfo, PaperAccount, SignalInfo, StrategyScore, TradeIdea,
 } from '../../core/models/market-data.models';
 import { MarketDataService } from '../../core/services/market-data.service';
+import { BriefingCardComponent } from './briefing-card.component';
+import { GuardianPanelComponent } from './guardian-panel.component';
 import { RegimeBannerComponent } from './regime-banner.component';
 
 /** The "is everything okay?" screen: one look = account health, today's signals,
@@ -18,12 +20,17 @@ import { RegimeBannerComponent } from './regime-banner.component';
   selector: 'app-dashboard-page',
   standalone: true,
   imports: [CommonModule, RouterLink, MatCardModule, MatButtonModule, MatIconModule,
-            MatTooltipModule, RegimeBannerComponent],
+            MatTooltipModule, RegimeBannerComponent, BriefingCardComponent,
+            GuardianPanelComponent],
   template: `
     <h2>Trade Desk</h2>
 
     <!-- ============ market regime: what kind of tape is this? ============ -->
     <app-regime-banner />
+
+    <!-- ============ the morning plan + the action queue ============ -->
+    <app-briefing-card />
+    <app-guardian-panel />
 
     <!-- ============ account health ============ -->
     @if (account(); as a) {

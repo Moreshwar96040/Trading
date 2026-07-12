@@ -56,5 +56,11 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./features/ai/ai-page.component').then((m) => m.AiPageComponent),
   },
+  {
+    path: 'alpha',
+    loadComponent: () =>
+      import('./features/alpha/alpha-stack-page.component')
+        .then((m) => m.AlphaStackPageComponent),
+  },
   { path: '**', redirectTo: 'dashboard' },
 ];

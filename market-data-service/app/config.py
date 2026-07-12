@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = True
     sync_cron: str = "30 18 * * 1-5"        # post-market IST, weekdays
     fundamentals_cron: str = "0 8 * * 6"    # Saturday morning IST (data changes quarterly)
+    briefing_cron: str = "45 8 * * 1-5"     # pre-market IST: warm the morning briefing
     timezone: str = "Asia/Kolkata"
 
     # --- service ---

@@ -19,6 +19,7 @@ const PAGES: PageResult[] = [
   { kind: 'page', icon: 'candlestick_chart', title: 'Charts', hint: 'price + indicators', path: '/chart' },
   { kind: 'page', icon: 'account_balance', title: 'Fundamentals', hint: 'ratios · statements · news', path: '/fundamentals' },
   { kind: 'page', icon: 'science', title: 'Strategy Lab', hint: 'backtest + robustness', path: '/strategies' },
+  { kind: 'page', icon: 'layers', title: 'Alpha Stack', hint: 'conviction-ranked setups', path: '/alpha' },
   { kind: 'page', icon: 'account_balance_wallet', title: 'Portfolio', hint: 'paper positions', path: '/portfolio' },
   { kind: 'page', icon: 'shield', title: 'Risk', hint: 'limits + sizing', path: '/risk' },
   { kind: 'page', icon: 'notifications', title: 'Alerts', hint: 'price + indicator alerts', path: '/alerts' },

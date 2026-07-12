@@ -212,6 +212,30 @@ def review_leaks(session: Session = Depends(get_session),
     return data
 
 
+@router.get("/internal/alpha/stack")
+def alpha_stack_endpoint(ticker: str | None = None,
+                         session: Session = Depends(get_session)) -> dict:
+    """Alpha Stack: conviction-ranked live setups (technical+quality+news+regime+ML)."""
+    from app.services.conviction_service import alpha_stack
+    return alpha_stack(session, ticker=ticker)
+
+
+@router.get("/internal/portfolio/health")
+def portfolio_health(session: Session = Depends(get_session)) -> dict:
+    """Position Guardian: proactive health checks + action queue for open positions."""
+    from app.services.guardian_service import position_health
+    return position_health(session)
+
+
+@router.get("/internal/briefing")
+def briefing(force: bool = False,
+             session: Session = Depends(get_session),
+             settings: Settings = Depends(get_settings)) -> dict:
+    """Morning briefing: guardian + regime + signals + held-stock news, AI-narrated."""
+    from app.services.briefing_service import build_briefing
+    return build_briefing(session, settings, force=force)
+
+
 @router.get("/internal/ai/usage")
 def ai_usage(session: Session = Depends(get_session),
              settings: Settings = Depends(get_settings)) -> dict:

@@ -7,10 +7,12 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { forkJoin } from 'rxjs';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { forkJoin, of } from 'rxjs';
+import { catchError } from 'rxjs/operators';
 
 import {
-  AiRiskPlan, PositionSizeResult, RegimeInfo, SignalInfo,
+  AiRiskPlan, AlphaSetup, PositionSizeResult, RegimeInfo, SignalInfo,
 } from '../../core/models/market-data.models';
 import { MarketDataService } from '../../core/services/market-data.service';
 
@@ -29,7 +31,7 @@ export interface TradeDialogResult {
   selector: 'app-trade-signal-dialog',
   standalone: true,
   imports: [CommonModule, FormsModule, MatDialogModule, MatButtonModule, MatIconModule,
-            MatFormFieldModule, MatInputModule, MatProgressSpinnerModule],
+            MatFormFieldModule, MatInputModule, MatProgressSpinnerModule, MatTooltipModule],
   template: `
     <div class="gate">
       <div class="gate-header">
@@ -38,6 +40,13 @@ export interface TradeDialogResult {
           <h2>{{ data.signal.ticker }} <span class="side">BUY</span></h2>
           <p class="sub">{{ data.signal.strategyName }} · signal of {{ data.signal.asOfDate }}</p>
         </div>
+        @if (setup(); as s) {
+          <div class="conviction" [class]="'conviction v-' + s.verdict.toLowerCase()"
+               [matTooltip]="convictionTooltip()">
+            <span class="conv-num">{{ s.conviction }}</span>
+            <span class="conv-label">conviction · {{ s.risk_multiplier }}× size</span>
+          </div>
+        }
       </div>
 
       @if (loading()) {
@@ -75,7 +84,7 @@ export interface TradeDialogResult {
                 (click)="place()">
           @if (placing()) { <mat-spinner diameter="18" /> } @else {
             <ng-container><mat-icon>bolt</mat-icon>
-              Buy {{ size()?.quantity }} · risk ₹{{ size()?.riskAmount | number: '1.0-0' }}
+              Buy {{ effectiveQty() }} · risk ₹{{ effectiveRisk() | number: '1.0-0' }}
             </ng-container>
           }
         </button>
@@ -126,6 +135,19 @@ export interface TradeDialogResult {
                   font-size: 13px; }
     .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
     .actions button mat-spinner { display: inline-block; }
+
+    .conviction {
+      margin-left: auto; text-align: right; padding: 6px 14px; border-radius: 12px;
+      border: 1px solid var(--card-border); cursor: help;
+    }
+    .conv-num { display: block; font: 700 22px 'Space Grotesk', sans-serif; line-height: 1; }
+    .conv-label { font-size: 10px; color: var(--text-dim); letter-spacing: 0.04em; }
+    .conviction.v-high { border-color: rgba(38,166,154,0.5); }
+    .conviction.v-high .conv-num { color: var(--up); }
+    .conviction.v-normal .conv-num { color: var(--accent); }
+    .conviction.v-small .conv-num { color: #ffb74d; }
+    .conviction.v-stand_aside .conv-num, .conviction.v-vetoed .conv-num { color: var(--down); }
+    .conviction.v-vetoed { border-color: rgba(239,83,80,0.5); }
   `,
 })
 export class TradeSignalDialogComponent implements OnInit {
@@ -139,16 +161,20 @@ export class TradeSignalDialogComponent implements OnInit {
   readonly regime = signal<RegimeInfo | null>(null);
   readonly size = signal<PositionSizeResult | null>(null);
   readonly sizeError = signal<string | null>(null);
+  readonly setup = signal<AlphaSetup | null>(null);
   reason = '';
 
   ngOnInit(): void {
     forkJoin({
       risk: this.api.getAiRisk(this.data.signal.ticker),
       regime: this.api.getRegime(),
+      alpha: this.api.getAlphaStack(this.data.signal.ticker)
+        .pipe(catchError(() => of(null))),   // conviction is additive, not required
     }).subscribe({
-      next: ({ risk, regime }) => {
+      next: ({ risk, regime, alpha }) => {
         this.risk.set(risk);
         this.regime.set(regime);
+        this.setup.set(alpha?.setups?.[0] ?? null);
         this.api.calcPositionSize(risk.as_of_price, risk.stop_price).subscribe({
           next: (s) => {
             this.loading.set(false);
@@ -203,23 +229,64 @@ export class TradeSignalDialogComponent implements OnInit {
         detail: 'The adaptive-risk engine reads this symbol as trending down — a long here is counter-trend.',
       });
     }
+    const setup = this.setup();
+    if (setup) {
+      if (setup.quality) {
+        rows.push({
+          label: `Business quality: grade ${setup.quality.grade} (${setup.quality.score}/100)`,
+          warn: setup.quality.grade === 'D',
+          detail: 'Fundamental floor from ROE, margins, growth, leverage and valuation.',
+        });
+      }
+      if (setup.news_veto) {
+        rows.push({
+          label: 'NEWS VETO — recent headlines read negative', warn: true,
+          detail: 'The cached news digest is negative on this stock. The Alpha Stack blocks sizing until the news cycle clears or you re-run the digest.',
+        });
+      } else if (setup.sentiment) {
+        rows.push({
+          label: `News sentiment: ${setup.sentiment}`,
+          warn: setup.sentiment === 'mixed',
+          detail: 'From the cached AI news digest — a live gate, never a backtest input.',
+        });
+      }
+    }
     return rows;
   });
+
+  /** Conviction-scaled size: base risk sizing × the Alpha Stack multiplier. */
+  effectiveQty(): number {
+    const base = this.size()?.quantity ?? 0;
+    const mult = this.setup()?.risk_multiplier ?? 1;
+    return Math.floor(base * mult);
+  }
+
+  effectiveRisk(): number {
+    const base = this.size()?.riskAmount ?? 0;
+    const mult = this.setup()?.risk_multiplier ?? 1;
+    return base * mult;
+  }
+
+  convictionTooltip(): string {
+    const s = this.setup();
+    if (!s) return '';
+    return s.breakdown.map((b) => `${b.points >= 0 ? '+' : ''}${b.points} ${b.note}`).join('\n');
+  }
 
   reasonValid(): boolean {
     return this.reason.trim().length >= 12;
   }
 
   canPlace(): boolean {
-    return !this.loading() && !this.sizeError() && !!this.size() && this.reasonValid();
+    return !this.loading() && !this.sizeError() && !!this.size()
+      && this.effectiveQty() >= 1 && !this.setup()?.news_veto && this.reasonValid();
   }
 
   place(): void {
     const r = this.risk()!;
-    const s = this.size()!;
     const sig = this.data.signal;
     this.placing.set(true);
-    this.api.placePaperOrder(sig.ticker, 'BUY', s.quantity, {
+    this.api.placePaperOrder(sig.ticker, 'BUY', this.effectiveQty(), {
       strategyId: sig.strategyId,
       stopPrice: r.stop_price,
       targetPrice: r.take_profit_price,
@@ -231,14 +298,17 @@ export class TradeSignalDialogComponent implements OnInit {
           return;
         }
         // the reason becomes a journal entry linked to the order — the review loop
+        const conviction = this.setup()
+          ? ` · conviction ${this.setup()!.conviction} (${this.setup()!.risk_multiplier}× size)`
+          : '';
         this.api.createJournalEntry({
           ticker: sig.ticker,
           paperOrderId: order.id,
           title: `ENTRY ${sig.ticker} — ${sig.strategyName}`,
-          body: `${this.reason.trim()}\n\n— plan: ${s.quantity} @ ₹${order.price}, `
+          body: `${this.reason.trim()}\n\n— plan: ${order.quantity} @ ₹${order.price}, `
             + `stop ₹${r.stop_price}, `
             + (r.take_profit_price ? `target ₹${r.take_profit_price}, R:R ${r.reward_risk}` : 'trailing stop')
-            + ` · risk ₹${Math.round(s.riskAmount).toLocaleString('en-IN')}`,
+            + ` · risk ₹${Math.round(this.effectiveRisk()).toLocaleString('en-IN')}${conviction}`,
           tags: 'entry,discipline-gate',
         }).subscribe({
           next: () => this.ref.close({

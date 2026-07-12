@@ -199,6 +199,76 @@ export interface RegimeInfo {
   note?: string;
 }
 
+export interface QualityScore {
+  score: number;
+  grade: 'A' | 'B' | 'C' | 'D';
+  components: { profitability: number; growth: number; balance_sheet: number;
+                valuation: number };
+}
+
+export interface AlphaSetup {
+  ticker: string;
+  name: string;
+  sector: string | null;
+  close: number | null;
+  strategies: { id: number; name: string }[];
+  conviction: number;
+  risk_multiplier: number;
+  news_veto: boolean;
+  quality: QualityScore | null;
+  sentiment: string | null;
+  verdict: 'HIGH' | 'NORMAL' | 'SMALL' | 'STAND_ASIDE' | 'VETOED';
+  breakdown: { layer: string; points: number; note: string }[];
+}
+
+export interface AlphaStack {
+  status: 'OK' | 'NO_SIGNALS';
+  regime: { code: string | null; label: string | null };
+  setups: AlphaSetup[];
+  note: string | null;
+}
+
+export interface GuardianAction {
+  severity: 'high' | 'medium' | 'info';
+  kind: string;
+  ticker: string | null;
+  text: string;
+  suggested_stop?: number;
+}
+
+export interface GuardianReport {
+  status: 'OK' | 'NO_POSITIONS';
+  note?: string;
+  positions?: {
+    ticker: string; name: string; sector: string | null; quantity: number;
+    avg_cost: number; close: number | null; stop_price: number | null;
+    target_price: number | null; pnl_pct: number | null; checks: string[];
+  }[];
+  actions?: GuardianAction[];
+  summary?: { open_positions: number; portfolio_value: number; equity: number;
+              high_priority: number };
+}
+
+export interface MorningBriefing {
+  date: string;
+  actions: GuardianAction[];
+  summary: GuardianReport['summary'] | null;
+  regime: RegimeInfo;
+  signals: { strategy: string; ticker: string; signal: 'ENTRY' | 'EXIT'; close: number | null }[];
+  llm_enabled: boolean;
+  narrative: {
+    insight?: {
+      headline?: string;
+      market_read?: string;
+      position_plans?: { ticker: string; plan: string }[];
+      opportunities?: string[];
+      discipline_note?: string;
+    };
+    error?: string;
+    cached?: boolean;
+  } | null;
+}
+
 export interface AiUsageBucket {
   calls: number;
   input_tokens: number;

@@ -4,10 +4,10 @@ import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import {
-  AiPredictionRow, AiRiskPlan, AiUsageSummary, AlertInfo, BacktestDetail,
+  AiPredictionRow, AiRiskPlan, AiUsageSummary, AlertInfo, AlphaStack, BacktestDetail,
   BacktestRunParams, CandleSeries,
-  FundamentalsData, IndicatorSeries, InsightResponse, JournalEntry, LeaksReport,
-  NewsResponse, PaperAccount, PaperOrder, RegimeInfo,
+  FundamentalsData, GuardianReport, IndicatorSeries, InsightResponse, JournalEntry,
+  LeaksReport, MorningBriefing, NewsResponse, PaperAccount, PaperOrder, RegimeInfo,
   PositionSizeResult, Quote, RiskReport, RiskSettings, ScreenRequest, ScreenRow,
   ScreenerFieldsMeta, SignalInfo, StrategyDefinition, StrategyInfo, StrategyScore,
   SymbolInfo, TradeIdeasResponse,
@@ -243,5 +243,24 @@ export class MarketDataService {
 
   getAiUsage(): Observable<AiUsageSummary> {
     return this.http.get<AiUsageSummary>(`${this.base}/ai/usage`);
+  }
+
+  getAlphaStack(ticker?: string): Observable<AlphaStack> {
+    const params = ticker ? new HttpParams().set('ticker', ticker) : new HttpParams();
+    return this.http.get<AlphaStack>(`${this.base}/alpha/stack`, { params });
+  }
+
+  getPortfolioHealth(): Observable<GuardianReport> {
+    return this.http.get<GuardianReport>(`${this.base}/portfolio/health`);
+  }
+
+  getBriefing(force = false): Observable<MorningBriefing> {
+    return this.http.get<MorningBriefing>(`${this.base}/briefing`, { params: { force } });
+  }
+
+  updatePositionStop(ticker: string, stopPrice: number):
+      Observable<{ ticker: string; oldStop: number | null; newStop: number }> {
+    return this.http.post<{ ticker: string; oldStop: number | null; newStop: number }>(
+      `${this.base}/paper/positions/${ticker}/stop`, { stopPrice });
   }
 }
