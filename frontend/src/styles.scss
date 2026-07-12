@@ -90,17 +90,82 @@ html, body {
 body {
   font-family: Inter, Roboto, 'Helvetica Neue', sans-serif;
   color: var(--mat-sys-on-surface);
-  // ambient corner glows — the signature fintech backdrop
-  background:
-    radial-gradient(1100px 700px at 88% -12%, var(--bg-glow-1), transparent 60%),
-    radial-gradient(950px 650px at -12% 112%, var(--bg-glow-2), transparent 60%),
-    var(--mat-sys-surface);
-  background-attachment: fixed;
+  background: var(--mat-sys-surface);
   -webkit-font-smoothing: antialiased;
   transition: background 0.3s ease, color 0.3s ease;
+  overflow-x: hidden;
+}
+
+// ---- living aurora backdrop: two huge blurred orbs drifting on 40s loops ------
+body::before, body::after {
+  content: '';
+  position: fixed;
+  z-index: -1;
+  width: 65vmax; height: 65vmax;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.75;
+  pointer-events: none;
+  will-change: transform;
+}
+body::before {
+  top: -28vmax; right: -18vmax;
+  background: radial-gradient(circle at 40% 40%, var(--bg-glow-1), transparent 62%);
+  animation: aurora-a 44s ease-in-out infinite alternate;
+}
+body::after {
+  bottom: -30vmax; left: -20vmax;
+  background: radial-gradient(circle at 60% 60%, var(--bg-glow-2), transparent 62%);
+  animation: aurora-b 52s ease-in-out infinite alternate;
+}
+@keyframes aurora-a {
+  from { transform: translate(0, 0) scale(1); }
+  50%  { transform: translate(-9vmax, 7vmax) scale(1.12); }
+  to   { transform: translate(4vmax, -5vmax) scale(0.95); }
+}
+@keyframes aurora-b {
+  from { transform: translate(0, 0) scale(1); }
+  50%  { transform: translate(8vmax, -8vmax) scale(1.15); }
+  to   { transform: translate(-5vmax, 4vmax) scale(0.92); }
+}
+@media (prefers-reduced-motion: reduce) {
+  body::before, body::after { animation: none; }
 }
 
 h1, h2, h3, h4 { letter-spacing: -0.015em; }
+
+// ---- display typography: page titles get the flagship face + gradient ink -----
+h2 {
+  font-family: 'Space Grotesk', Inter, sans-serif;
+  font-weight: 700;
+  font-size: 26px;
+  background: linear-gradient(92deg, var(--title-from) 20%, var(--accent) 75%, var(--accent-2));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
+// ---- prices & metrics read like a terminal ------------------------------------
+.metric-value, .quote-price, .ring-score {
+  font-family: 'JetBrains Mono', 'Inter', monospace;
+}
+
+// ---- focus ring worthy of a keyboard user -------------------------------------
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+// ---- skeleton shimmer utility (add class="skeleton" to any placeholder) -------
+.skeleton {
+  position: relative; overflow: hidden;
+  background: var(--card-border); border-radius: 8px; min-height: 14px;
+}
+.skeleton::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,0.09) 50%, transparent 70%);
+  animation: shimmer 1.4s infinite;
+}
+@keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
 
 ::selection { background: rgba(56, 189, 248, 0.3); }
 
@@ -118,8 +183,11 @@ h1, h2, h3, h4 { letter-spacing: -0.015em; }
 // ---- let the ambient background show through the shell ----------------------
 mat-sidenav-container, mat-sidenav-content { background: transparent !important; }
 
-// ---- glass cards -------------------------------------------------------------
+// ---- glass cards with cursor spotlight ----------------------------------------
+// AppComponent tracks the pointer and sets --mx/--my on the hovered card; the
+// ::after overlay paints a soft light that follows the cursor across the glass.
 .mat-mdc-card {
+  position: relative;
   border-radius: 16px !important;
   border: 1px solid var(--card-border) !important;
   background:
@@ -129,6 +197,17 @@ mat-sidenav-container, mat-sidenav-content { background: transparent !important;
   transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease,
               background 0.3s ease;
 }
+.mat-mdc-card::after {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  background: radial-gradient(480px circle at var(--mx, 50%) var(--my, 50%),
+              rgba(56, 189, 248, 0.09), transparent 45%);
+}
+.mat-mdc-card:hover::after { opacity: 1; }
 .mat-mdc-card:hover {
   border-color: var(--card-glow) !important;
   box-shadow: var(--card-shadow), 0 0 0 1px rgba(56, 189, 248, 0.06);
@@ -181,13 +260,27 @@ mat-sidenav-container, mat-sidenav-content { background: transparent !important;
   box-shadow: 0 4px 14px -6px rgba(56, 189, 248, 0.4);
 }
 
-// ---- primary buttons get the brand gradient -----------------------------------
+// ---- primary buttons get the brand gradient + a light sweep on hover ----------
 .mat-mdc-unelevated-button.mat-primary {
+  position: relative;
+  overflow: hidden;
   background: linear-gradient(135deg, var(--accent), var(--accent-2)) !important;
   color: var(--on-gradient) !important;
   font-weight: 600;
   transition: box-shadow 0.2s ease, transform 0.2s ease, filter 0.2s ease;
 }
+.mat-mdc-unelevated-button.mat-primary::before {
+  content: '';
+  position: absolute; top: 0; bottom: 0; left: -75%;
+  width: 50%;
+  background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  transform: skewX(-20deg);
+  transition: none;
+}
+.mat-mdc-unelevated-button.mat-primary:hover::before {
+  animation: sheen 0.7s ease;
+}
+@keyframes sheen { to { left: 125%; } }
 .mat-mdc-unelevated-button.mat-primary:hover:not([disabled]) {
   box-shadow: 0 6px 20px -6px rgba(56, 189, 248, 0.55);
   filter: brightness(1.08);
@@ -222,14 +315,13 @@ mat-sidenav-content > :not(router-outlet) {
   animation: pageIn 0.4s cubic-bezier(0.22, 0.9, 0.3, 1) both;
 }
 
-// staggered entrance for metric card grids
-.metric-cards > * { animation: pageIn 0.45s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
-.metric-cards > *:nth-child(2) { animation-delay: 0.05s; }
-.metric-cards > *:nth-child(3) { animation-delay: 0.1s; }
-.metric-cards > *:nth-child(4) { animation-delay: 0.15s; }
-.metric-cards > *:nth-child(5) { animation-delay: 0.2s; }
-.metric-cards > *:nth-child(6) { animation-delay: 0.25s; }
-.metric-cards > *:nth-child(7) { animation-delay: 0.3s; }
+// staggered entrance for card grids (dashboard metrics + fundamentals ratios)
+.metric-cards > *, .cards > * { animation: pageIn 0.45s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
+@for $i from 2 through 15 {
+  .metric-cards > *:nth-child(#{$i}), .cards > *:nth-child(#{$i}) {
+    animation-delay: #{($i - 1) * 0.04}s;
+  }
+}
 
 // ---- semantic P&L colors everywhere ------------------------------------------
 .up { color: var(--up) !important; }

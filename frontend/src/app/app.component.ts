@@ -6,8 +6,10 @@ import { MatListModule } from '@angular/material/list';
 import { MatSidenavModule } from '@angular/material/sidenav';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { NavigationCancel, NavigationEnd, NavigationError, NavigationStart, Router,
+         RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 
+import { CommandPaletteComponent } from './command-palette.component';
 import { AiUsageSummary } from './core/models/market-data.models';
 import { MarketDataService } from './core/services/market-data.service';
 import { ThemeService } from './core/services/theme.service';
@@ -61,13 +63,21 @@ const NAV_SECTIONS: NavSection[] = [
   standalone: true,
   imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive, MatToolbarModule,
             MatSidenavModule, MatListModule, MatIconModule, MatButtonModule,
-            MatTooltipModule],
+            MatTooltipModule, CommandPaletteComponent],
   template: `
+    <!-- route-change progress beam -->
+    <div class="route-beam" [class.loading]="routeLoading()"></div>
+
     <mat-toolbar class="toolbar">
       <div class="brand-mark"><mat-icon>candlestick_chart</mat-icon></div>
       <span class="title">Trading Platform</span>
       <span class="badge">NSE</span>
       <span class="spacer"></span>
+      <button class="cmdk" (click)="paletteOpen.set(true)"
+              matTooltip="Jump anywhere — pages or tickers">
+        <mat-icon>search</mat-icon> Search
+        <span class="cmdk-keys"><kbd>Ctrl</kbd><kbd>K</kbd></span>
+      </button>
       <div class="market-status" [class.open]="marketOpen()">
         <span class="dot"></span>
         {{ marketOpen() ? 'Market open' : 'Market closed' }}
@@ -108,9 +118,47 @@ const NAV_SECTIONS: NavSection[] = [
         <router-outlet />
       </mat-sidenav-content>
     </mat-sidenav-container>
+
+    @if (paletteOpen()) {
+      <app-command-palette (close)="paletteOpen.set(false)" />
+    }
   `,
   styles: `
     :host { display: flex; flex-direction: column; height: 100%; }
+
+    .route-beam {
+      position: fixed; top: 0; left: 0; right: 100%; height: 2.5px; z-index: 1100;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.7);
+      opacity: 0; transition: opacity 0.3s ease 0.2s;
+    }
+    .route-beam.loading {
+      opacity: 1; transition: none;
+      animation: beam 1s cubic-bezier(0.3, 0.8, 0.4, 1) infinite;
+    }
+    @keyframes beam {
+      0% { left: 0; right: 100%; }
+      50% { left: 20%; right: 20%; }
+      100% { left: 100%; right: 0; }
+    }
+
+    .cmdk {
+      display: flex; align-items: center; gap: 8px;
+      font: 500 12.5px Inter, sans-serif; color: var(--text-dim);
+      padding: 6px 8px 6px 12px; border-radius: 10px; cursor: pointer;
+      border: 1px solid var(--card-border); background: var(--glass-bg);
+      transition: border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .cmdk:hover {
+      border-color: var(--card-glow); color: var(--mat-sys-on-surface);
+      box-shadow: 0 0 14px -4px rgba(56, 189, 248, 0.5);
+    }
+    .cmdk mat-icon { font-size: 16px; width: 16px; height: 16px; }
+    .cmdk-keys kbd {
+      font: 600 10px Inter, sans-serif; color: var(--text-dim);
+      border: 1px solid var(--card-border); border-radius: 5px;
+      padding: 1px 5px; margin-left: 3px; background: rgba(255, 255, 255, 0.04);
+    }
 
     .toolbar {
       gap: 12px;
@@ -208,9 +256,12 @@ const NAV_SECTIONS: NavSection[] = [
 export class AppComponent {
   readonly theme = inject(ThemeService);
   private readonly api = inject(MarketDataService);
+  private readonly router = inject(Router);
   readonly sections = NAV_SECTIONS;
   readonly istNow = signal(this.computeIst());
   readonly aiUsage = signal<AiUsageSummary | null>(null);
+  readonly paletteOpen = signal(false);
+  readonly routeLoading = signal(false);
   readonly marketOpen = computed(() => {
     const now = this.istNow();
     const day = now.getDay();                            // shifted date: getters read IST wall time
@@ -226,7 +277,41 @@ export class AppComponent {
     });
     loadUsage();
     const usageTimer = setInterval(loadUsage, 120_000);   // refresh every 2 min
-    inject(DestroyRef).onDestroy(() => { clearInterval(timer); clearInterval(usageTimer); });
+
+    // ---- Ctrl/Cmd+K opens the command palette anywhere ----
+    const onKeydown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        this.paletteOpen.update((open) => !open);
+      }
+    };
+    document.addEventListener('keydown', onKeydown);
+
+    // ---- cursor spotlight: paint --mx/--my on whichever card the pointer is over ----
+    const onPointerMove = (e: PointerEvent) => {
+      const card = (e.target as HTMLElement)?.closest?.('.mat-mdc-card') as HTMLElement | null;
+      if (card) {
+        const rect = card.getBoundingClientRect();
+        card.style.setProperty('--mx', `${e.clientX - rect.left}px`);
+        card.style.setProperty('--my', `${e.clientY - rect.top}px`);
+      }
+    };
+    document.addEventListener('pointermove', onPointerMove, { passive: true });
+
+    // ---- route-change beam ----
+    const routerSub = this.router.events.subscribe((ev) => {
+      if (ev instanceof NavigationStart) this.routeLoading.set(true);
+      else if (ev instanceof NavigationEnd || ev instanceof NavigationCancel
+               || ev instanceof NavigationError) this.routeLoading.set(false);
+    });
+
+    inject(DestroyRef).onDestroy(() => {
+      clearInterval(timer);
+      clearInterval(usageTimer);
+      document.removeEventListener('keydown', onKeydown);
+      document.removeEventListener('pointermove', onPointerMove);
+      routerSub.unsubscribe();
+    });
   }
 
   aiSpendTooltip(): string {
