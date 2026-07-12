@@ -85,3 +85,40 @@ def test_sync_respects_ticker_filter(session, reliance):
     provider = FakeProvider()
     sync_daily(session, provider, tickers=["reliance"], default_lookback_days=5, today=TODAY)
     assert len(provider.calls) == 1
+
+
+def test_sync_backfills_head_gap_when_start_date_given(session, reliance):
+    # Stored history starts 2026-06-30; ask for history back to 2026-06-20.
+    session.add(OhlcvDaily(symbol_id=reliance.id, trade_date=date(2026, 6, 30),
+                           open=1, high=2, low=1, close=1.5, adj_close=1.5, volume=10))
+    session.commit()
+
+    provider = FakeProvider()
+    summary = sync_daily(session, provider, today=TODAY, start_date=date(2026, 6, 20))
+
+    assert (("RELIANCE.NS", date(2026, 6, 20), date(2026, 6, 29)) in provider.calls)
+    assert (("RELIANCE.NS", date(2026, 7, 1), TODAY) in provider.calls)
+    assert summary["status"] == "SUCCESS"
+    stored = session.query(OhlcvDaily).filter_by(symbol_id=reliance.id).count()
+    assert stored > 1  # head gap actually landed in the DB
+
+
+def test_sync_start_date_noop_when_history_already_covers_it(session, reliance):
+    session.add(OhlcvDaily(symbol_id=reliance.id, trade_date=TODAY,
+                           open=1, high=2, low=1, close=1.5, adj_close=1.5, volume=10))
+    session.commit()
+
+    provider = FakeProvider()
+    summary = sync_daily(session, provider, today=TODAY, start_date=TODAY)
+
+    assert provider.calls == []
+    assert summary["symbols"]["RELIANCE"]["note"] == "up to date"
+
+
+def test_sync_empty_table_uses_start_date_over_lookback(session, reliance):
+    provider = FakeProvider()
+    sync_daily(session, provider, default_lookback_days=5, today=TODAY,
+               start_date=date(2026, 6, 1))
+    (_, start, end) = provider.calls[0]
+    assert start == date(2026, 6, 1)
+    assert end == TODAY

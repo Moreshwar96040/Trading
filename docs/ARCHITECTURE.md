@@ -58,7 +58,6 @@ Trading/
 ├── .env.example                # every configurable value, documented
 ├── README.md                   # how to run everything
 ├── docs/ARCHITECTURE.md        # this file
-├── nse_dataset/                # existing 20-stock CSV dataset (ingestion input)
 ├── backend/                    # Spring Boot 3 / Java 21 — domain API
 │   └── src/main/java/com/tradingplatform/api/
 │       ├── common/             #   config, security, error handling

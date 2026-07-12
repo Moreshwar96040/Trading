@@ -10,7 +10,7 @@ from app.db import get_session
 from app.models import Symbol
 from app.providers.base import MarketDataProvider, ProviderError
 from app.providers.yahoo import YahooProvider
-from app.schemas import IngestCsvRequest, QuoteResponse, RunSummary, SyncRequest
+from app.schemas import IngestCsvRequest, QuoteResponse, RunSummary, SeedSymbolRequest, SeedSymbolResponse, SyncRequest
 from app.services.csv_ingestion import ingest_directory
 from app.services.sync_service import sync_daily
 
@@ -44,7 +44,59 @@ def run_sync(body: SyncRequest,
              settings: Settings = Depends(get_settings),
              provider: MarketDataProvider = Depends(get_provider)) -> RunSummary:
     return RunSummary(**sync_daily(session, provider, tickers=body.tickers,
-                                   default_lookback_days=settings.sync_default_lookback_days))
+                                   default_lookback_days=settings.sync_default_lookback_days,
+                                   start_date=body.from_date))
+
+
+@router.post("/internal/symbols/seed", response_model=SeedSymbolResponse)
+def seed_symbol(body: SeedSymbolRequest,
+                session: Session = Depends(get_session),
+                settings: Settings = Depends(get_settings),
+                provider: MarketDataProvider = Depends(get_provider)) -> SeedSymbolResponse:
+    """Validate a ticker on Yahoo Finance, insert it into symbols, and fetch historical OHLCV."""
+    import yfinance as yf
+
+    ticker = body.ticker.strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="ticker is required")
+
+    existing = session.scalar(select(Symbol).where(Symbol.ticker == ticker, Symbol.active))
+    if existing:
+        return SeedSymbolResponse(
+            id=existing.id, ticker=existing.ticker, name=existing.name,
+            sector=existing.sector, exchange=existing.exchange,
+            currency=existing.currency, yahoo_symbol=existing.yahoo_symbol, seeded=False,
+        )
+
+    yahoo_symbol = f"{ticker}.NS"
+    try:
+        info = yf.Ticker(yahoo_symbol).info
+        name = info.get("longName") or info.get("shortName") if info else None
+        if not name:
+            raise HTTPException(status_code=404, detail=f"Symbol '{ticker}' not found on Yahoo Finance")
+        sector = info.get("sector")
+        currency = info.get("currency") or "INR"
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Yahoo Finance lookup failed: {exc}") from exc
+
+    sym = Symbol(ticker=ticker, yahoo_symbol=yahoo_symbol, name=name,
+                 sector=sector, exchange="NSE", currency=currency, active=True)
+    session.add(sym)
+    session.commit()
+    session.refresh(sym)
+
+    try:
+        sync_daily(session, provider, tickers=[ticker],
+                   default_lookback_days=settings.sync_default_lookback_days)
+    except Exception as exc:
+        log.warning("Historical data fetch failed for newly seeded %s: %s", ticker, exc)
+
+    return SeedSymbolResponse(
+        id=sym.id, ticker=sym.ticker, name=sym.name, sector=sym.sector,
+        exchange=sym.exchange, currency=sym.currency, yahoo_symbol=sym.yahoo_symbol, seeded=True,
+    )
 
 
 @router.get("/internal/indicators/{ticker}")
@@ -81,6 +133,66 @@ def fundamentals_refresh(body: SyncRequest,
     result = refresh_fundamentals(session, provider, tickers=body.tickers)
     refresh_snapshots(session)   # propagate new ratios onto the screener snapshot
     return result
+
+
+def _get_symbol(session: Session, ticker: str) -> Symbol:
+    sym = session.scalar(select(Symbol).where(Symbol.ticker == ticker.upper(), Symbol.active))
+    if sym is None:
+        raise HTTPException(status_code=404, detail=f"Unknown symbol: {ticker}")
+    return sym
+
+
+@router.get("/internal/news/{ticker}")
+def news(ticker: str, refresh: bool = False,
+         session: Session = Depends(get_session),
+         settings: Settings = Depends(get_settings)) -> dict:
+    """Stored headlines for a symbol plus a cached LLM digest.
+    `refresh=true` pulls the latest articles from Yahoo first."""
+    from app.ai.narrator import llm_enabled, news_insight
+    from app.services.news_service import fetch_and_store_news, latest_news
+
+    sym = _get_symbol(session, ticker)
+    fetched = fetch_and_store_news(session, sym, settings.news_max_articles) if refresh else 0
+    articles = latest_news(session, sym.id)
+    if not articles and not refresh:      # first visit: fetch instead of showing nothing
+        fetched = fetch_and_store_news(session, sym, settings.news_max_articles)
+        articles = latest_news(session, sym.id)
+
+    return {
+        "ticker": sym.ticker,
+        "fetched_new": fetched,
+        "llm_enabled": llm_enabled(settings),
+        "articles": [{"title": a.title, "publisher": a.publisher, "link": a.link,
+                      "published_at": a.published_at.isoformat() if a.published_at else None}
+                     for a in articles],
+        "insight": news_insight(session, settings, sym, articles),
+    }
+
+
+@router.get("/internal/insights/fundamentals/{ticker}")
+def fundamentals_insights(ticker: str,
+                          session: Session = Depends(get_session),
+                          settings: Settings = Depends(get_settings)) -> dict:
+    """Plain-language LLM read of the stored fundamentals (cached until refresh)."""
+    from app.ai.narrator import fundamentals_insight, llm_enabled
+    from app.models import FinancialStatement, Fundamentals
+
+    sym = _get_symbol(session, ticker)
+    fundamentals = session.get(Fundamentals, sym.id)
+    if fundamentals is None:
+        raise HTTPException(status_code=404,
+                            detail=f"No fundamentals stored for {ticker} — refresh them first")
+    stmts = session.scalars(
+        select(FinancialStatement).where(FinancialStatement.symbol_id == sym.id)
+        .order_by(FinancialStatement.period_end.desc()).limit(4)).all()
+    statement_rows = [{"period_end": s.period_end.isoformat(), "period_type": s.period_type,
+                       "revenue": s.revenue, "net_income": s.net_income, "eps": s.eps}
+                      for s in stmts]
+
+    return {"ticker": sym.ticker,
+            "llm_enabled": llm_enabled(settings),
+            "insight": fundamentals_insight(session, settings, sym, fundamentals,
+                                            statement_rows)}
 
 
 @router.post("/internal/ai/train")

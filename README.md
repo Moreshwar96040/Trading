@@ -30,14 +30,15 @@ python -m venv .venv && .venv\Scripts\activate      # Windows
 pip install -r requirements-dev.txt
 uvicorn app.main:app --port 8000
 
-# 4. Load your 2-year CSV dataset into PostgreSQL (one-time, idempotent)
-curl -X POST localhost:8080/api/v1/sync/csv-import
-
-# 5. Frontend
+# 4. Frontend
 cd frontend && npm install && npm start
 ```
 
-Open http://localhost:4200 → search `RELIANCE` → 2-year candlestick chart.
+Trigger the first sync to backfill history from Yahoo Finance (lookback window set by
+`SYNC_DEFAULT_LOOKBACK_DAYS`, default 730 days):
+`curl -X POST localhost:8080/api/v1/sync/daily -H "Content-Type: application/json" -d "{}"`.
+
+Open http://localhost:4200 → search `RELIANCE` → candlestick chart.
 
 ## Daily use
 
@@ -52,7 +53,6 @@ Manual sync: `curl -X POST localhost:8080/api/v1/sync/daily -H "Content-Type: ap
 | `GET /api/v1/symbols/{ticker}/candles?from&to` | daily candles (ISO dates) |
 | `GET /api/v1/quotes/{ticker}` | delayed quote (proxied to Python → Yahoo) |
 | `POST /api/v1/sync/daily` | trigger EOD sync (gap backfill included) |
-| `POST /api/v1/sync/csv-import` | one-time import of `nse_dataset/` |
 | `POST /api/v1/sync/snapshot` | recompute screener snapshots (auto after daily sync) |
 | `GET /api/v1/indicators/{ticker}?from&to` | indicator series (SMA/EMA/RSI/MACD/BB/ATR) |
 | `POST /api/v1/screener/run` | run screen: `{"conditions":[{"field":"rsi_14","op":"lt","value":30}]}` — `ref` instead of `value` compares two fields |

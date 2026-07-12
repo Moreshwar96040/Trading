@@ -234,6 +234,37 @@ class AiPrediction(Base):
                                                         server_default=func.now())
 
 
+class NewsArticle(Base):
+    __tablename__ = "news_articles"
+    __table_args__ = (UniqueConstraint("symbol_id", "external_id",
+                                       name="uq_news_symbol_external"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    symbol_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("symbols.id", ondelete="CASCADE"),
+                                           nullable=False)
+    external_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    publisher: Mapped[str | None] = mapped_column(String(120))
+    link: Mapped[str | None] = mapped_column(String(1000))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AiInsight(Base):
+    """Cached LLM-generated insight per (symbol, kind). Regenerated when the
+    fingerprint of its inputs changes (new articles / refreshed fundamentals)."""
+    __tablename__ = "ai_insights"
+
+    symbol_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("symbols.id", ondelete="CASCADE"),
+                                           primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20), primary_key=True)   # NEWS | FUNDAMENTALS
+    content: Mapped[dict] = mapped_column(JSON, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(120), nullable=False)
+    model_name: Mapped[str | None] = mapped_column(String(60))
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
+                                                          server_default=func.now())
+
+
 class SyncAudit(Base):
     __tablename__ = "sync_audit"
 

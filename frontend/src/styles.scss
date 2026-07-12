@@ -16,33 +16,37 @@ html {
   ));
 
   // ---- dark surface scale (designed, not inverted) ----
-  --mat-sys-surface: #070b14;
-  --mat-sys-surface-container-lowest: #060a12;
-  --mat-sys-surface-container-low: #0b111d;
-  --mat-sys-surface-container: #0e1524;
-  --mat-sys-surface-container-high: #131c2e;
-  --mat-sys-surface-container-highest: #182338;
-  --mat-sys-on-surface: #e2e8f0;
-  --mat-sys-on-surface-variant: #94a3b8;
-  --mat-sys-outline-variant: rgba(148, 163, 184, 0.16);
-  --mat-sys-primary: #38bdf8;
-  --mat-sys-on-primary: #04121f;
+  // `& {}` keeps these applying to <html> while satisfying Sass's new
+  // declarations-after-nested-rules ordering (mat.theme emits nested rules).
+  & {
+    --mat-sys-surface: #070b14;
+    --mat-sys-surface-container-lowest: #060a12;
+    --mat-sys-surface-container-low: #0b111d;
+    --mat-sys-surface-container: #0e1524;
+    --mat-sys-surface-container-high: #131c2e;
+    --mat-sys-surface-container-highest: #182338;
+    --mat-sys-on-surface: #e2e8f0;
+    --mat-sys-on-surface-variant: #94a3b8;
+    --mat-sys-outline-variant: rgba(148, 163, 184, 0.16);
+    --mat-sys-primary: #38bdf8;
+    --mat-sys-on-primary: #04121f;
 
-  --accent: #38bdf8;
-  --accent-2: #818cf8;
-  --up: #26a69a;
-  --down: #ef5350;
-  --card-border: rgba(148, 163, 184, 0.12);
-  --card-glow: rgba(56, 189, 248, 0.28);
-  --card-shadow: 0 10px 30px -12px rgba(2, 6, 16, 0.9);
-  --glass-bg: rgba(14, 21, 36, 0.72);
-  --shell-glass: rgba(9, 13, 22, 0.65);
-  --text-dim: #94a3b8;
-  --title-from: #f1f5f9;
-  --title-to: #94a3b8;
-  --bg-glow-1: rgba(129, 140, 248, 0.13);
-  --bg-glow-2: rgba(56, 189, 248, 0.10);
-  --on-gradient: #061020;   // dark text on the bright cyan gradient
+    --accent: #38bdf8;
+    --accent-2: #818cf8;
+    --up: #26a69a;
+    --down: #ef5350;
+    --card-border: rgba(148, 163, 184, 0.12);
+    --card-glow: rgba(56, 189, 248, 0.28);
+    --card-shadow: 0 10px 30px -12px rgba(2, 6, 16, 0.9);
+    --glass-bg: rgba(14, 21, 36, 0.72);
+    --shell-glass: rgba(9, 13, 22, 0.65);
+    --text-dim: #94a3b8;
+    --title-from: #f1f5f9;
+    --title-to: #94a3b8;
+    --bg-glow-1: rgba(129, 140, 248, 0.13);
+    --bg-glow-2: rgba(56, 189, 248, 0.10);
+    --on-gradient: #061020;   // dark text on the bright cyan gradient
+  }
 }
 
 // ---- light theme: a deliberate cool-white palette, same accent language ------

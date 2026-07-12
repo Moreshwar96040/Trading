@@ -18,6 +18,8 @@ import com.tradingplatform.api.paper.service.PriceService.ReferencePrice;
 import com.tradingplatform.api.paper.web.dto.PaperDtos.OrderDto;
 import com.tradingplatform.api.paper.web.dto.PaperDtos.OrderRequest;
 import com.tradingplatform.api.risk.service.RiskService;
+import com.tradingplatform.api.strategy.repository.StrategyRepository;
+import com.tradingplatform.api.journal.repository.JournalEntryRepository;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.util.Optional;
@@ -52,6 +54,12 @@ class PaperTradingServiceTest {
     private RiskService riskService;
 
     @Mock
+    private StrategyRepository strategies;
+
+    @Mock
+    private JournalEntryRepository journal;
+
+    @Mock
     private Symbol reliance;
 
     private PaperTradingService service;
@@ -60,7 +68,7 @@ class PaperTradingServiceTest {
     @BeforeEach
     void setUp() throws Exception {
         service = new PaperTradingService(accounts, positions, orders, symbolService,
-                priceService, riskService, new BigDecimal("0.0"));  // zero commission
+                priceService, riskService, strategies, journal, new BigDecimal("0.0"));  // zero commission
         // default: no risk breach; individual tests override
         when(riskService.checkBuyAgainstLimits(any(), any())).thenReturn(null);
         when(positions.findByAccountIdAndQuantityGreaterThan(any(), any()))
@@ -101,7 +109,7 @@ class PaperTradingServiceTest {
     void buyFillsAndDebitsCash() {
         when(positions.findByAccountIdAndSymbolId(1L, 10L)).thenReturn(Optional.empty());
 
-        OrderDto order = service.placeOrder(new OrderRequest("RELIANCE", "BUY", 100));
+        OrderDto order = service.placeOrder(new OrderRequest("RELIANCE", "BUY", 100, null, null, null));
 
         assertThat(order.status()).isEqualTo("FILLED");
         assertThat(order.price()).isEqualByComparingTo("100.00");
@@ -112,7 +120,7 @@ class PaperTradingServiceTest {
     void buyBeyondCashIsRejectedAndNothingChanges() {
         when(positions.findByAccountIdAndSymbolId(1L, 10L)).thenReturn(Optional.empty());
 
-        OrderDto order = service.placeOrder(new OrderRequest("RELIANCE", "BUY", 2000));
+        OrderDto order = service.placeOrder(new OrderRequest("RELIANCE", "BUY", 2000, null, null, null));
 
         assertThat(order.status()).isEqualTo("REJECTED");
         assertThat(order.rejectReason()).contains("Insufficient cash");
@@ -127,7 +135,7 @@ class PaperTradingServiceTest {
         when(priceService.getReferencePrice(reliance))
                 .thenReturn(new ReferencePrice(new BigDecimal("120.00"), "CLOSE"));
 
-        service.placeOrder(new OrderRequest("RELIANCE", "BUY", 50));
+        service.placeOrder(new OrderRequest("RELIANCE", "BUY", 50, null, null, null));
 
         // (100*100 + 50*120) / 150 = 106.6667
         assertThat(position.getQuantity()).isEqualTo(150);
@@ -140,7 +148,7 @@ class PaperTradingServiceTest {
         position.applyBuy(100, new BigDecimal("80.00"));             // basis 80
         when(positions.findByAccountIdAndSymbolId(1L, 10L)).thenReturn(Optional.of(position));
 
-        OrderDto order = service.placeOrder(new OrderRequest("RELIANCE", "SELL", 40));
+        OrderDto order = service.placeOrder(new OrderRequest("RELIANCE", "SELL", 40, null, null, null));
 
         assertThat(order.status()).isEqualTo("FILLED");
         assertThat(order.realizedPnl()).isEqualByComparingTo("800.00");  // 40 * (100-80)
@@ -155,7 +163,7 @@ class PaperTradingServiceTest {
         position.applyBuy(10, new BigDecimal("100.00"));
         when(positions.findByAccountIdAndSymbolId(1L, 10L)).thenReturn(Optional.of(position));
 
-        OrderDto order = service.placeOrder(new OrderRequest("RELIANCE", "SELL", 50));
+        OrderDto order = service.placeOrder(new OrderRequest("RELIANCE", "SELL", 50, null, null, null));
 
         assertThat(order.status()).isEqualTo("REJECTED");
         assertThat(order.rejectReason()).contains("have 10");
@@ -166,7 +174,7 @@ class PaperTradingServiceTest {
     void sellingUnownedSymbolIsRejected() {
         when(positions.findByAccountIdAndSymbolId(1L, 10L)).thenReturn(Optional.empty());
 
-        OrderDto order = service.placeOrder(new OrderRequest("RELIANCE", "SELL", 5));
+        OrderDto order = service.placeOrder(new OrderRequest("RELIANCE", "SELL", 5, null, null, null));
 
         assertThat(order.status()).isEqualTo("REJECTED");
         assertThat(order.rejectReason()).contains("have 0");
@@ -178,7 +186,7 @@ class PaperTradingServiceTest {
         when(riskService.checkBuyAgainstLimits(any(), any()))
                 .thenReturn("Risk limit: position would be 50.0% of equity (max 20.0%)");
 
-        OrderDto order = service.placeOrder(new OrderRequest("RELIANCE", "BUY", 500));
+        OrderDto order = service.placeOrder(new OrderRequest("RELIANCE", "BUY", 500, null, null, null));
 
         assertThat(order.status()).isEqualTo("REJECTED");
         assertThat(order.rejectReason()).contains("Risk limit");
@@ -187,11 +195,11 @@ class PaperTradingServiceTest {
 
     @Test
     void invalidRequestsAreRejectedUpfront() {
-        assertThatThrownBy(() -> service.placeOrder(new OrderRequest(" ", "BUY", 1)))
+        assertThatThrownBy(() -> service.placeOrder(new OrderRequest(" ", "BUY", 1, null, null, null)))
                 .isInstanceOf(BadRequestException.class);
-        assertThatThrownBy(() -> service.placeOrder(new OrderRequest("RELIANCE", "HOLD", 1)))
+        assertThatThrownBy(() -> service.placeOrder(new OrderRequest("RELIANCE", "HOLD", 1, null, null, null)))
                 .isInstanceOf(BadRequestException.class);
-        assertThatThrownBy(() -> service.placeOrder(new OrderRequest("RELIANCE", "BUY", 0)))
+        assertThatThrownBy(() -> service.placeOrder(new OrderRequest("RELIANCE", "BUY", 0, null, null, null)))
                 .isInstanceOf(BadRequestException.class);
     }
 }

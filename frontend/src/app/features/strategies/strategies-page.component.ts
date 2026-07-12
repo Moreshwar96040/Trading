@@ -4,6 +4,8 @@ import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatCheckboxModule } from '@angular/material/checkbox';
+import { provideNativeDateAdapter } from '@angular/material/core';
+import { MatDatepickerModule } from '@angular/material/datepicker';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
@@ -36,8 +38,9 @@ interface RuleDraft { left: string; op: string; right: string; }
   standalone: true,
   imports: [CommonModule, FormsModule, MatCardModule, MatListModule, MatButtonModule,
             MatIconModule, MatFormFieldModule, MatInputModule, MatSelectModule,
-            MatCheckboxModule, MatTableModule, MatProgressSpinnerModule, MatSnackBarModule,
-            MatTooltipModule, EquityChartComponent],
+            MatCheckboxModule, MatDatepickerModule, MatTableModule, MatProgressSpinnerModule,
+            MatSnackBarModule, MatTooltipModule, EquityChartComponent],
+  providers: [provideNativeDateAdapter()],
   template: `
     <!-- ============ live signals ============ -->
     <mat-card appearance="outlined" class="signals-card">
@@ -223,11 +226,15 @@ interface RuleDraft { left: string; op: string; right: string; }
         <div class="row">
           <mat-form-field appearance="outline">
             <mat-label>From</mat-label>
-            <input matInput [(ngModel)]="fromDate" placeholder="2024-07-01">
+            <input matInput [matDatepicker]="fromPicker" [(ngModel)]="fromDate">
+            <mat-datepicker-toggle matIconSuffix [for]="fromPicker"></mat-datepicker-toggle>
+            <mat-datepicker #fromPicker></mat-datepicker>
           </mat-form-field>
           <mat-form-field appearance="outline">
             <mat-label>To</mat-label>
-            <input matInput [(ngModel)]="toDate" placeholder="2026-06-30">
+            <input matInput [matDatepicker]="toPicker" [(ngModel)]="toDate">
+            <mat-datepicker-toggle matIconSuffix [for]="toPicker"></mat-datepicker-toggle>
+            <mat-datepicker #toPicker></mat-datepicker>
           </mat-form-field>
           <mat-form-field appearance="outline">
             <mat-label>Capital (₹)</mat-label>
@@ -248,7 +255,8 @@ interface RuleDraft { left: string; op: string; right: string; }
             </mat-select>
           </mat-form-field>
           <button mat-stroked-button class="run-btn" (click)="refreshData()"
-                  [disabled]="busy()" matTooltip="Fetch the latest prices from the internet before testing">
+                  [disabled]="busy()"
+                  matTooltip="Fetch prices from the internet before testing — also backfills history back to the From date">
             <mat-icon>cloud_download</mat-icon> Sync latest
           </button>
           <button mat-flat-button color="primary" class="run-btn" (click)="run()"
@@ -269,6 +277,12 @@ interface RuleDraft { left: string; op: string; right: string; }
     <!-- ============ results ============ -->
     @if (result(); as r) {
       @if (r.metrics; as m) {
+        @if (m.data_coverage_note) {
+          <mat-card appearance="outlined" class="coverage-note">
+            <mat-icon>info</mat-icon>
+            <span>{{ m.data_coverage_note }}</span>
+          </mat-card>
+        }
         <div class="metric-cards">
           <mat-card appearance="outlined" class="metric">
             <span class="metric-value" [class.up]="m.total_return_pct > 0"
@@ -375,6 +389,8 @@ interface RuleDraft { left: string; op: string; right: string; }
     .risk-row { margin-top: 8px; }
     .run-card { padding: 16px; margin-top: 16px; }
     .run-btn { height: 48px; }
+    .coverage-note { display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+                      margin-top: 12px; color: #b98900; font-size: 13px; }
     .metric-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
                     gap: 12px; margin: 16px 0; }
     .metric { padding: 14px; display: flex; flex-direction: column; gap: 4px; }
@@ -417,8 +433,8 @@ export class StrategiesPageComponent implements OnInit {
   atrStopMult: number | null = null;
   atrTrail = false;
 
-  fromDate = '';
-  toDate = '';
+  fromDate: Date | null = null;
+  toDate: Date | null = null;
   capital = 1_000_000;
   maxPositions = 5;
   commissionPct = 0.05;
@@ -524,10 +540,16 @@ export class StrategiesPageComponent implements OnInit {
 
   refreshData(): void {
     this.busy.set(true);
-    this.api.triggerDailySync().subscribe({
+    // Pass the backtest From date so the sync backfills history that far back,
+    // not just the forward gap since the last stored bar.
+    const from = this.iso(this.fromDate);
+    this.api.triggerDailySync([], from).subscribe({
       next: () => {
         this.busy.set(false);
-        this.snackBar.open('Latest prices synced from the internet', undefined, { duration: 3000 });
+        this.snackBar.open(
+          from ? `Prices synced (history backfilled to ${from})`
+               : 'Latest prices synced from the internet',
+          undefined, { duration: 3000 });
       },
       error: () => {
         this.busy.set(false);
@@ -615,14 +637,15 @@ export class StrategiesPageComponent implements OnInit {
     });
   }
 
-  run(): void {
+  run(autoBackfilled = false): void {
     const current = this.selected();
     if (!current) return;
     this.busy.set(true);
     this.result.set(null);
+    const from = this.iso(this.fromDate);
     this.api.runBacktest(current.id, {
-      from: this.fromDate || undefined,
-      to: this.toDate || undefined,
+      from,
+      to: this.iso(this.toDate),
       initial_capital: this.capital,
       max_positions: this.maxPositions,
       commission_pct: this.commissionPct,
@@ -635,10 +658,36 @@ export class StrategiesPageComponent implements OnInit {
         });
       },
       error: (err) => {
+        const msg: string = err?.error?.message ?? '';
+        // Stored history doesn't reach the requested window: backfill it from the
+        // provider automatically, then retry the backtest once.
+        if (!autoBackfilled && from && msg.includes('No price data in the requested window')) {
+          const note = this.snackBar.open(
+            `No stored history for this window — backfilling prices from ${from}, ` +
+            'this can take a few minutes…');
+          this.api.triggerDailySync([], from).subscribe({
+            next: () => { note.dismiss(); this.run(true); },
+            error: () => {
+              note.dismiss();
+              this.busy.set(false);
+              this.snackBar.open('History backfill failed — check the data service',
+                                 'Dismiss', { duration: 6000 });
+            },
+          });
+          return;
+        }
         this.busy.set(false);
-        this.snackBar.open(err?.error?.message ?? 'Backtest failed', 'Dismiss', { duration: 6000 });
+        this.snackBar.open(msg || 'Backtest failed', 'Dismiss', { duration: 6000 });
       },
     });
+  }
+
+  /** Date -> local ISO yyyy-MM-dd (undefined when unset). */
+  private iso(d: Date | null): string | undefined {
+    if (!d) return undefined;
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${m}-${day}`;
   }
 
   private toDraft(rule: StrategyRule): RuleDraft {

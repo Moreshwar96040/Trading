@@ -21,8 +21,14 @@ log = logging.getLogger(__name__)
 def sync_daily(session: Session, provider: MarketDataProvider,
                tickers: list[str] | None = None,
                default_lookback_days: int = 730,
-               today: date | None = None) -> dict:
-    """Sync EOD candles for the given tickers (default: all active). Returns a summary."""
+               today: date | None = None,
+               start_date: date | None = None) -> dict:
+    """Sync EOD candles for the given tickers (default: all active). Returns a summary.
+
+    ``start_date`` requests history at least back to that date: besides the usual
+    forward gap-fill (last stored bar .. today), any head gap (start_date .. first
+    stored bar) is also fetched, so old windows can be backfilled on demand.
+    """
     today = today or date.today()
     audit = SyncAudit(run_type="DAILY_SYNC", status="RUNNING",
                       ticker=tickers[0] if tickers and len(tickers) == 1 else None)
@@ -39,18 +45,36 @@ def sync_daily(session: Session, provider: MarketDataProvider,
     failures: list[str] = []
 
     for sym in symbols:
-        last: date | None = session.scalar(
-            select(func.max(OhlcvDaily.trade_date)).where(OhlcvDaily.symbol_id == sym.id))
-        start = (last + timedelta(days=1)) if last else today - timedelta(days=default_lookback_days)
-        if start > today:
+        first, last = session.execute(
+            select(func.min(OhlcvDaily.trade_date), func.max(OhlcvDaily.trade_date))
+            .where(OhlcvDaily.symbol_id == sym.id)).one()
+
+        # Windows to fetch: forward gap-fill (last+1 .. today) as always, plus a
+        # head backfill (start_date .. first-1) when older history was requested.
+        default_start = start_date or (today - timedelta(days=default_lookback_days))
+        windows: list[tuple[date, date]] = []
+        if last is None:
+            windows.append((default_start, today))
+        else:
+            if start_date is not None and start_date < first:
+                windows.append((start_date, first - timedelta(days=1)))
+            if last < today:
+                windows.append((last + timedelta(days=1), today))
+
+        if not windows:
             per_symbol[sym.ticker] = {"inserted": 0, "rejected": 0, "note": "up to date"}
             continue
+        inserted = rejected = 0
+        fetched = []
         try:
-            raw = provider.fetch_daily(sym.yahoo_symbol, start, today)
-            clean, rejected = validate_frame(raw)
-            inserted = bulk_insert_ohlcv(session, sym.id, clean)
+            for win_start, win_end in windows:
+                raw = provider.fetch_daily(sym.yahoo_symbol, win_start, win_end)
+                clean, win_rejected = validate_frame(raw)
+                inserted += bulk_insert_ohlcv(session, sym.id, clean)
+                rejected += win_rejected
+                fetched.append(f"{win_start}..{win_end}")
             per_symbol[sym.ticker] = {"inserted": inserted, "rejected": rejected,
-                                      "window": f"{start}..{today}"}
+                                      "window": ", ".join(fetched)}
             inserted_total += inserted
             rejected_total += rejected
         except ProviderError as exc:

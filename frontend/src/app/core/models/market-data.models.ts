@@ -156,6 +156,7 @@ export interface BacktestMetrics {
   avg_win: number | null;
   avg_loss: number | null;
   final_equity: number;
+  data_coverage_note?: string;
 }
 
 export interface BacktestTradeRow {
@@ -358,4 +359,47 @@ export interface Quote {
   change: number | null;
   change_pct: number | null;
   as_of: string;
+}
+
+// ---- news & AI insights ----------------------------------------------------
+
+export interface NewsArticle {
+  title: string;
+  publisher: string | null;
+  link: string | null;
+  published_at: string | null;
+}
+
+export interface NewsInsight {
+  summary?: string;
+  sentiment?: 'positive' | 'negative' | 'neutral' | 'mixed';
+  key_points?: string[];
+  watch_for?: string[];
+  error?: string;
+}
+
+export interface NewsResponse {
+  ticker: string;
+  fetched_new: number;
+  llm_enabled: boolean;
+  articles: NewsArticle[];
+  insight: { insight: NewsInsight; generated_at: string | null; cached: boolean }
+    | NewsInsight | null;
+}
+
+export interface FundamentalsInsight {
+  headline?: string;
+  verdict?: 'strong' | 'good' | 'mixed' | 'weak';
+  summary?: string;
+  strengths?: string[];
+  concerns?: string[];
+  metrics_explained?: { metric: string; value: string; meaning: string }[];
+  error?: string;
+}
+
+export interface InsightResponse {
+  ticker: string;
+  llm_enabled: boolean;
+  insight: { insight: FundamentalsInsight; generated_at: string | null; cached: boolean }
+    | FundamentalsInsight | null;
 }

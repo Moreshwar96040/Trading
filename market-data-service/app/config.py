@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     yahoo_backoff_seconds: float = 2.0      # base for exponential backoff
     sync_default_lookback_days: int = 730   # backfill window for a symbol with no data yet
 
+    # --- news & AI insights ---
+    anthropic_api_key: str = ""             # empty = LLM insights disabled (articles still shown)
+    anthropic_model: str = "claude-haiku-4-5"
+    anthropic_max_tokens: int = 1000
+    news_max_articles: int = 12             # per symbol, per fetch
+
     # --- scheduler ---
     scheduler_enabled: bool = True
     sync_cron: str = "30 18 * * 1-5"        # post-market IST, weekdays

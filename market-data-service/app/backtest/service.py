@@ -4,13 +4,13 @@ import logging
 from datetime import date, datetime, timezone
 
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.backtest.engine import BacktestParams, run_backtest
 from app.backtest.metrics import compute_metrics
 from app.backtest.rules import validate_rules
-from app.models import Backtest, BacktestTrade, Strategy, Symbol
+from app.models import Backtest, BacktestTrade, OhlcvDaily, Strategy, Symbol
 from app.services.indicator_service import load_ohlcv
 
 log = logging.getLogger(__name__)
@@ -111,16 +111,40 @@ def _execute(session: Session, strategy: Strategy, record: Backtest, params: dic
         raise ValueError("No matching symbols")
 
     data = {}
+    earliest_stored: date | None = None
     for sym in symbols:
-        df = load_ohlcv(session, sym.id, until=to_date)
-        if from_date is not None:
-            df = df[df["trade_date"] >= from_date]
+        # Earliest bar on record (ignoring the window) so error/coverage messages
+        # can say how far back stored history actually goes.
+        sym_earliest = session.scalar(
+            select(func.min(OhlcvDaily.trade_date)).where(OhlcvDaily.symbol_id == sym.id))
+        if sym_earliest is not None:
+            earliest_stored = sym_earliest if earliest_stored is None else min(earliest_stored, sym_earliest)
+        raw = load_ohlcv(session, sym.id, until=to_date)
+        df = raw[raw["trade_date"] >= from_date] if from_date is not None else raw
         frame = resample_ohlcv(df.set_index("trade_date"), timeframe)
         if len(frame) < MIN_BARS:
             continue
         data[sym.ticker] = frame
     if not data:
-        raise ValueError("No price data in the requested window — run the CSV import/sync first")
+        if earliest_stored is not None and from_date is not None:
+            hint = (f"stored history only starts {earliest_stored.isoformat()}; run a sync "
+                    f"with from_date={from_date.isoformat()} (or click 'Sync latest data' "
+                    "with this From date) to backfill it")
+        else:
+            hint = "run a daily sync first"
+        raise ValueError(f"No price data in the requested window — {hint} "
+                         "(POST /api/v1/sync/daily)")
+
+    # The DB only ever holds what a prior sync fetched; a "from" earlier than the oldest
+    # stored bar isn't a filtering bug, it just has nothing to filter — surface it instead
+    # of silently running on a shorter window than the user asked for.
+    data_coverage_note = None
+    if from_date is not None and earliest_stored is not None and earliest_stored > from_date:
+        data_coverage_note = (
+            f"Requested data from {from_date.isoformat()}, but stored history only goes back "
+            f"to {earliest_stored.isoformat()} — the backtest ran on {earliest_stored.isoformat()}"
+            f".. instead. Run a sync with a longer lookback to backfill further."
+        )
 
     engine_params = BacktestParams(
         initial_capital=float(params.get("initial_capital", 1_000_000)),
@@ -137,6 +161,8 @@ def _execute(session: Session, strategy: Strategy, record: Backtest, params: dic
                           engine_params)
     metrics = compute_metrics(result.equity_curve, result.trades,
                               engine_params.initial_capital)
+    if data_coverage_note:
+        metrics["data_coverage_note"] = data_coverage_note
 
     record.status = "SUCCESS"
     record.finished_at = datetime.now(timezone.utc)

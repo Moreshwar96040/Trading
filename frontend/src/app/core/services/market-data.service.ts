@@ -5,7 +5,8 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
   AiPredictionRow, AiRiskPlan, AlertInfo, BacktestDetail, BacktestRunParams, CandleSeries,
-  FundamentalsData, IndicatorSeries, JournalEntry, PaperAccount, PaperOrder,
+  FundamentalsData, IndicatorSeries, InsightResponse, JournalEntry, NewsResponse,
+  PaperAccount, PaperOrder,
   PositionSizeResult, Quote, RiskReport, RiskSettings, ScreenRequest, ScreenRow,
   ScreenerFieldsMeta, SignalInfo, StrategyDefinition, StrategyInfo, StrategyScore,
   SymbolInfo, TradeIdeasResponse,
@@ -20,6 +21,10 @@ export class MarketDataService {
   searchSymbols(query: string): Observable<SymbolInfo[]> {
     const params = query ? new HttpParams().set('query', query) : new HttpParams();
     return this.http.get<SymbolInfo[]>(`${this.base}/symbols`, { params });
+  }
+
+  seedSymbol(ticker: string): Observable<SymbolInfo> {
+    return this.http.post<SymbolInfo>(`${this.base}/symbols/seed`, { ticker });
   }
 
   getCandles(ticker: string, from?: string, to?: string): Observable<CandleSeries> {
@@ -48,8 +53,9 @@ export class MarketDataService {
     return this.http.get<IndicatorSeries>(`${this.base}/indicators/${ticker}`, { params });
   }
 
-  triggerDailySync(tickers: string[] = []): Observable<unknown> {
-    return this.http.post(`${this.base}/sync/daily`, { tickers });
+  /** @param from optional ISO date — backfill history at least back to this date. */
+  triggerDailySync(tickers: string[] = [], from?: string): Observable<unknown> {
+    return this.http.post(`${this.base}/sync/daily`, from ? { tickers, from } : { tickers });
   }
 
   triggerCsvImport(): Observable<unknown> {
@@ -215,5 +221,14 @@ export class MarketDataService {
 
   triggerFundamentalsRefresh(tickers: string[] = []): Observable<unknown> {
     return this.http.post(`${this.base}/sync/fundamentals`, { tickers });
+  }
+
+  getNews(ticker: string, refresh = false): Observable<NewsResponse> {
+    return this.http.get<NewsResponse>(`${this.base}/news/${ticker}`,
+                                       { params: { refresh } });
+  }
+
+  getFundamentalsInsights(ticker: string): Observable<InsightResponse> {
+    return this.http.get<InsightResponse>(`${this.base}/fundamentals/${ticker}/insights`);
   }
 }

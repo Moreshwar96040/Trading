@@ -20,11 +20,17 @@ public class SyncController {
         this.marketData = marketData;
     }
 
-    /** POST /api/v1/sync/daily  body: {"tickers": ["RELIANCE"]} (empty = all). */
+    /**
+     * POST /api/v1/sync/daily  body: {"tickers": ["RELIANCE"], "from": "2020-01-01"}
+     * (both optional; empty tickers = all, "from" backfills history back to that date).
+     */
     @PostMapping("/daily")
-    public SyncSummaryDto syncDaily(@RequestBody(required = false) Map<String, List<String>> body) {
-        List<String> tickers = body == null ? List.of() : body.getOrDefault("tickers", List.of());
-        return marketData.syncDaily(tickers);
+    @SuppressWarnings("unchecked")
+    public SyncSummaryDto syncDaily(@RequestBody(required = false) Map<String, Object> body) {
+        List<String> tickers = body != null && body.get("tickers") instanceof List<?> list
+                ? (List<String>) list : List.of();
+        String from = body != null && body.get("from") instanceof String s ? s : null;
+        return marketData.syncDaily(tickers, from);
     }
 
     /** POST /api/v1/sync/csv-import — one-time import of the local dataset. */

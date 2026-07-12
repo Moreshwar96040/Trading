@@ -42,10 +42,20 @@ public class MarketDataServiceClient {
     }
 
     public SyncSummaryDto syncDaily(List<String> tickers) {
+        return syncDaily(tickers, null);
+    }
+
+    /** @param fromDate optional ISO date — backfill history at least back to this date. */
+    public SyncSummaryDto syncDaily(List<String> tickers, String fromDate) {
         try {
+            var body = new java.util.HashMap<String, Object>();
+            body.put("tickers", tickers == null ? List.of() : tickers);
+            if (fromDate != null && !fromDate.isBlank()) {
+                body.put("from_date", fromDate);
+            }
             return http.post().uri("/internal/sync/daily")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(Map.of("tickers", tickers == null ? List.of() : tickers))
+                    .body(body)
                     .retrieve().body(SyncSummaryDto.class);
         } catch (RestClientException ex) {
             throw new UpstreamException("Sync service unavailable", ex);
@@ -87,6 +97,44 @@ public class MarketDataServiceClient {
                     .retrieve().body(Map.class);
         } catch (RestClientException ex) {
             throw new UpstreamException("Fundamentals refresh unavailable", ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getNews(String ticker, boolean refresh) {
+        try {
+            return http.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/news/{ticker}")
+                            .queryParam("refresh", refresh).build(ticker))
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("News service unavailable for " + ticker, ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getFundamentalsInsights(String ticker) {
+        try {
+            return http.get().uri("/internal/insights/fundamentals/{ticker}", ticker)
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Insight service unavailable for " + ticker, ex);
+        }
+    }
+
+    /** Symbol metadata returned after seeding from Yahoo Finance. */
+    public record SymbolSeedResult(Long id, String ticker, String name, String sector,
+                                   String exchange, String currency, String yahooSymbol,
+                                   boolean seeded) {}
+
+    public SymbolSeedResult seedSymbol(String ticker) {
+        try {
+            return http.post().uri("/internal/symbols/seed")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("ticker", ticker))
+                    .retrieve().body(SymbolSeedResult.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Symbol seed unavailable for " + ticker, ex);
         }
     }
 

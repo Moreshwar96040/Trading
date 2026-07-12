@@ -15,7 +15,9 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { debounceTime, distinctUntilChanged, filter, switchMap } from 'rxjs';
 import { toSignal } from '@angular/core/rxjs-interop';
 
-import { FundamentalsData, StatementRow, SymbolInfo } from '../../core/models/market-data.models';
+import {
+  FundamentalsData, FundamentalsInsight, NewsArticle, NewsInsight, StatementRow, SymbolInfo,
+} from '../../core/models/market-data.models';
 import { MarketDataService } from '../../core/services/market-data.service';
 
 interface RatioCard {
@@ -78,6 +80,54 @@ const CRORE = 1e7;
           }
         </div>
         <p class="asof">Ratios as of {{ r.computedAt | date: 'medium' }} (Yahoo Finance)</p>
+
+        <!-- ============ AI insight: what the numbers mean ============ -->
+        @if (insight(); as ins) {
+          <mat-card appearance="outlined" class="insight-card">
+            <div class="insight-header">
+              <mat-icon>auto_awesome</mat-icon>
+              <h3>What these numbers mean</h3>
+              @if (ins.verdict) {
+                <span class="verdict" [class]="'verdict verdict-' + ins.verdict">{{ ins.verdict }}</span>
+              }
+            </div>
+            @if (ins.headline) { <p class="insight-headline">{{ ins.headline }}</p> }
+            @if (ins.summary) { <p class="insight-summary">{{ ins.summary }}</p> }
+            <div class="pro-con">
+              @if (ins.strengths?.length) {
+                <div>
+                  <h4 class="good">Strengths</h4>
+                  <ul>@for (s of ins.strengths; track s) { <li>{{ s }}</li> }</ul>
+                </div>
+              }
+              @if (ins.concerns?.length) {
+                <div>
+                  <h4 class="bad">Concerns</h4>
+                  <ul>@for (c of ins.concerns; track c) { <li>{{ c }}</li> }</ul>
+                </div>
+              }
+            </div>
+            @if (ins.metrics_explained?.length) {
+              <table class="metric-table">
+                @for (m of ins.metrics_explained; track m.metric) {
+                  <tr>
+                    <td class="metric-name">{{ m.metric }}</td>
+                    <td class="metric-value">{{ m.value }}</td>
+                    <td class="metric-meaning">{{ m.meaning }}</td>
+                  </tr>
+                }
+              </table>
+            }
+            <p class="disclaimer">AI-generated explanation for education, not investment advice.</p>
+          </mat-card>
+        } @else if (insightLoading()) {
+          <mat-card appearance="outlined" class="insight-card">
+            <div class="insight-loading"><mat-spinner diameter="22" /> Reading the numbers…</div>
+          </mat-card>
+        } @else if (llmDisabled()) {
+          <p class="asof">Set ANTHROPIC_API_KEY in .env to get plain-language AI explanations
+            of these numbers.</p>
+        }
       } @else {
         <mat-card appearance="outlined" class="empty-card">
           <p>No fundamentals stored yet for {{ d.ticker }}.</p>
@@ -114,6 +164,45 @@ const CRORE = 1e7;
           <tr mat-row *matRowDef="let s; columns: stmtColumnKeys"></tr>
         </table>
       }
+
+      <!-- ============ news & AI digest ============ -->
+      <div class="stmt-header news-header">
+        <h3>Latest news</h3>
+        <button mat-stroked-button (click)="refreshNews()" [disabled]="newsLoading()">
+          <mat-icon>refresh</mat-icon>
+          {{ newsLoading() ? 'Fetching…' : 'Refresh news' }}
+        </button>
+      </div>
+      @if (newsInsight(); as ni) {
+        <mat-card appearance="outlined" class="insight-card">
+          <div class="insight-header">
+            <mat-icon>auto_awesome</mat-icon>
+            <h3>News digest</h3>
+            @if (ni.sentiment) {
+              <span class="verdict" [class]="'verdict sentiment-' + ni.sentiment">{{ ni.sentiment }}</span>
+            }
+          </div>
+          @if (ni.summary) { <p class="insight-summary">{{ ni.summary }}</p> }
+          @if (ni.key_points?.length) {
+            <ul>@for (p of ni.key_points; track p) { <li>{{ p }}</li> }</ul>
+          }
+          @if (ni.watch_for?.length) {
+            <p class="watch-for"><strong>Watch for:</strong> {{ ni.watch_for!.join(' · ') }}</p>
+          }
+        </mat-card>
+      }
+      @if (news().length) {
+        <div class="news-list">
+          @for (a of news(); track a.title) {
+            <a class="news-item" [href]="a.link" target="_blank" rel="noopener">
+              <span class="news-title">{{ a.title }}</span>
+              <span class="news-meta">{{ a.publisher }} · {{ a.published_at | date: 'MMM d, y' }}</span>
+            </a>
+          }
+        </div>
+      } @else if (!newsLoading()) {
+        <p class="hint">No stored news yet — hit "Refresh news".</p>
+      }
     } @else if (!loading()) {
       <p class="hint">Search for a symbol to see its fundamentals.</p>
     }
@@ -138,6 +227,39 @@ const CRORE = 1e7;
     .down { color: #ef5350; }
     .spinner { display: flex; justify-content: center; padding: 24px; }
     .hint { opacity: 0.6; margin-top: 16px; }
+    .insight-card { padding: 16px 20px; margin: 16px 0; }
+    .insight-loading { display: flex; align-items: center; gap: 12px; opacity: 0.7; }
+    .insight-header { display: flex; align-items: center; gap: 8px; }
+    .insight-header h3 { margin: 0; font-weight: 500; }
+    .insight-headline { font-weight: 500; margin: 10px 0 4px; }
+    .insight-summary { margin: 8px 0; line-height: 1.5; }
+    .verdict { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+               padding: 3px 10px; border-radius: 12px; font-weight: 600; }
+    .verdict-strong, .sentiment-positive { background: #1b5e2033; color: #66bb6a; }
+    .verdict-good { background: #33691e33; color: #9ccc65; }
+    .verdict-mixed, .sentiment-mixed, .sentiment-neutral { background: #f57f1733; color: #ffb74d; }
+    .verdict-weak, .sentiment-negative { background: #b71f1f33; color: #ef5350; }
+    .pro-con { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+               gap: 0 24px; }
+    .pro-con h4 { margin: 8px 0 2px; font-weight: 600; font-size: 13px; }
+    .pro-con h4.good { color: #66bb6a; }
+    .pro-con h4.bad { color: #ef5350; }
+    .pro-con ul, .insight-card ul { margin: 4px 0; padding-left: 20px; }
+    .pro-con li, .insight-card li { margin: 3px 0; line-height: 1.4; }
+    .metric-table { margin-top: 12px; border-collapse: collapse; width: 100%; }
+    .metric-table td { padding: 6px 12px 6px 0; vertical-align: top; font-size: 13px; }
+    .metric-name { font-weight: 600; white-space: nowrap; }
+    .metric-value { white-space: nowrap; opacity: 0.9; }
+    .metric-meaning { opacity: 0.75; line-height: 1.4; }
+    .disclaimer { font-size: 11px; opacity: 0.45; margin: 12px 0 0; }
+    .watch-for { font-size: 13px; opacity: 0.85; }
+    .news-header { margin-top: 24px; }
+    .news-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+    .news-item { display: flex; flex-direction: column; padding: 10px 12px; border-radius: 8px;
+                 text-decoration: none; color: inherit; }
+    .news-item:hover { background: rgba(128, 128, 128, 0.08); }
+    .news-title { line-height: 1.4; }
+    .news-meta { font-size: 12px; opacity: 0.55; margin-top: 2px; }
   `,
 })
 export class FundamentalsPageComponent implements OnInit {
@@ -151,6 +273,13 @@ export class FundamentalsPageComponent implements OnInit {
   readonly loading = signal(false);
   readonly refreshing = signal(false);
   readonly periodType = signal<'annual' | 'quarterly'>('annual');
+
+  readonly insight = signal<FundamentalsInsight | null>(null);
+  readonly insightLoading = signal(false);
+  readonly llmDisabled = signal(false);
+  readonly news = signal<NewsArticle[]>([]);
+  readonly newsInsight = signal<NewsInsight | null>(null);
+  readonly newsLoading = signal(false);
 
   readonly stmtCols = [
     { key: 'revenue', label: 'Revenue', signed: false },
@@ -238,14 +367,64 @@ export class FundamentalsPageComponent implements OnInit {
     return (value / CRORE).toLocaleString('en-IN', { maximumFractionDigits: 0 });
   }
 
+  refreshNews(): void {
+    const ticker = this.data()?.ticker;
+    if (ticker) this.loadNews(ticker, true);
+  }
+
   private load(ticker: string): void {
     this.loading.set(true);
     this.api.getFundamentals(ticker).subscribe({
-      next: (d) => { this.data.set(d); this.loading.set(false); },
+      next: (d) => {
+        this.data.set(d);
+        this.loading.set(false);
+        if (d.ratios) this.loadInsight(ticker);
+        this.loadNews(ticker, false);
+      },
       error: () => {
         this.loading.set(false);
         this.snackBar.open(`Failed to load fundamentals for ${ticker}`, 'Dismiss', { duration: 4000 });
       },
     });
+  }
+
+  private loadInsight(ticker: string): void {
+    this.insight.set(null);
+    this.llmDisabled.set(false);
+    this.insightLoading.set(true);
+    this.api.getFundamentalsInsights(ticker).subscribe({
+      next: (resp) => {
+        this.insightLoading.set(false);
+        this.llmDisabled.set(!resp.llm_enabled);
+        this.insight.set(this.unwrap<FundamentalsInsight>(resp.insight));
+      },
+      error: () => this.insightLoading.set(false),   // insight is optional — fail quietly
+    });
+  }
+
+  private loadNews(ticker: string, refresh: boolean): void {
+    this.newsLoading.set(true);
+    if (refresh) { this.newsInsight.set(null); }
+    this.api.getNews(ticker, refresh).subscribe({
+      next: (resp) => {
+        this.newsLoading.set(false);
+        this.news.set(resp.articles);
+        this.newsInsight.set(this.unwrap<NewsInsight>(resp.insight));
+      },
+      error: () => {
+        this.newsLoading.set(false);
+        this.news.set([]);
+        this.newsInsight.set(null);
+      },
+    });
+  }
+
+  /** The API wraps cached insights as {insight, generated_at, cached}; errors as {error}. */
+  private unwrap<T>(raw: unknown): T | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    if ('error' in obj) return null;
+    if ('insight' in obj && obj['insight']) return obj['insight'] as T;
+    return obj as T;
   }
 }
