@@ -1,6 +1,9 @@
 package com.tradingplatform.api.paper.web;
 
+import com.tradingplatform.api.paper.service.PaperManagementService;
+import com.tradingplatform.api.paper.service.PaperManagementService.ManageResult;
 import com.tradingplatform.api.paper.service.PaperTradingService;
+import java.util.Map;
 import com.tradingplatform.api.paper.web.dto.PaperDtos.AccountDto;
 import com.tradingplatform.api.paper.web.dto.PaperDtos.OrderDto;
 import com.tradingplatform.api.paper.web.dto.PaperDtos.OrderRequest;
@@ -19,9 +22,20 @@ import org.springframework.web.bind.annotation.RestController;
 public class PaperTradingController {
 
     private final PaperTradingService paperTrading;
+    private final PaperManagementService management;
 
-    public PaperTradingController(PaperTradingService paperTrading) {
+    public PaperTradingController(PaperTradingService paperTrading,
+                                  PaperManagementService management) {
         this.paperTrading = paperTrading;
+        this.management = management;
+    }
+
+    /** AI position management: ratchet trailing stops; alert or (opt-in) exit on
+     *  stop/target hits. body (optional): {"autoExit": true} */
+    @PostMapping("/manage")
+    public ManageResult manage(@RequestBody(required = false) Map<String, Boolean> body) {
+        boolean autoExit = body != null && Boolean.TRUE.equals(body.get("autoExit"));
+        return management.manage(autoExit);
     }
 
     /** Account summary: cash, equity, realized/unrealized P&L, open positions. */

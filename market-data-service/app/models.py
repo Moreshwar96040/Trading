@@ -180,6 +180,25 @@ class BacktestTrade(Base):
     exit_reason: Mapped[str | None] = mapped_column(String(20))
 
 
+class StrategySignal(Base):
+    """Live entry/exit signals per strategy, refreshed after each daily sync.
+    Python-owned (it runs the rules engine); Spring reads them."""
+    __tablename__ = "strategy_signals"
+    __table_args__ = (UniqueConstraint("strategy_id", "symbol_id", "signal", "as_of_date",
+                                       name="uq_strategy_signal"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    strategy_id: Mapped[int] = mapped_column(BigInteger,
+                                             ForeignKey("strategies.id", ondelete="CASCADE"),
+                                             nullable=False)
+    symbol_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("symbols.id"), nullable=False)
+    signal: Mapped[str] = mapped_column(String(8), nullable=False)      # ENTRY | EXIT
+    as_of_date: Mapped[date] = mapped_column(Date, nullable=False)
+    close: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
+                                                          server_default=func.now())
+
+
 class Alert(Base):
     """Definition columns written by Spring; lifecycle columns (status/triggered_*)
     written here after each snapshot refresh. Disjoint writers by design."""

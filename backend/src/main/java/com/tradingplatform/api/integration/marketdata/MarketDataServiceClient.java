@@ -127,6 +127,43 @@ public class MarketDataServiceClient {
     }
 
     @SuppressWarnings("unchecked")
+    public Map<String, Object> getAiIdeas(int limit) {
+        try {
+            return http.get().uri("/internal/ai/ideas?limit={limit}", limit)
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("AI ideas service unavailable", ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getAiRisk(String ticker, Object entryPrice) {
+        try {
+            return http.get()
+                    .uri(uriBuilder -> {
+                        var b = uriBuilder.path("/internal/ai/risk/{ticker}");
+                        if (entryPrice != null) b = b.queryParam("entry_price", entryPrice);
+                        return b.build(ticker);
+                    })
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Adaptive risk service unavailable for " + ticker, ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> evaluateSignals() {
+        try {
+            return http.post().uri("/internal/signals/evaluate")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of())
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Signal evaluation unavailable", ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
     public Map<String, Object> trainAi(List<String> tickers) {
         try {
             return http.post().uri("/internal/ai/train")

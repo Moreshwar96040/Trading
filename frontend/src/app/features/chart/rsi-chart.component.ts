@@ -1,9 +1,11 @@
 import {
-  AfterViewInit, Component, ElementRef, OnDestroy, ViewChild, effect, input,
+  AfterViewInit, Component, ElementRef, OnDestroy, ViewChild, effect, inject, input,
 } from '@angular/core';
 import {
   IChartApi, ISeriesApi, LineData, Time, createChart,
 } from 'lightweight-charts';
+
+import { ThemeService } from '../../core/services/theme.service';
 
 /** Small RSI pane with 30/70 guide lines, time-synced visually below the main chart. */
 @Component({
@@ -21,6 +23,7 @@ export class RsiChartComponent implements AfterViewInit, OnDestroy {
   @ViewChild('host', { static: true })
   private host!: ElementRef<HTMLDivElement>;
 
+  private readonly theme = inject(ThemeService);
   private chart?: IChartApi;
   private series?: ISeriesApi<'Line'>;
   private resizeObserver?: ResizeObserver;
@@ -33,6 +36,20 @@ export class RsiChartComponent implements AfterViewInit, OnDestroy {
         this.chart?.timeScale().fitContent();
       }
     });
+    effect(() => {
+      this.theme.mode();
+      this.chart?.applyOptions(this.themedOptions());
+    });
+  }
+
+  private themedOptions() {
+    const t = this.theme.chartTheme();
+    return {
+      layout: { background: { color: 'transparent' }, textColor: t.text },
+      grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
+      rightPriceScale: { borderColor: t.border },
+      timeScale: { borderColor: t.border },
+    };
   }
 
   ngAfterViewInit(): void {
@@ -40,13 +57,7 @@ export class RsiChartComponent implements AfterViewInit, OnDestroy {
     this.chart = createChart(el, {
       width: el.clientWidth,
       height: 140,
-      layout: { background: { color: 'transparent' }, textColor: '#cfd8dc' },
-      grid: {
-        vertLines: { color: 'rgba(197, 203, 206, 0.08)' },
-        horzLines: { color: 'rgba(197, 203, 206, 0.08)' },
-      },
-      rightPriceScale: { borderColor: 'rgba(197, 203, 206, 0.3)' },
-      timeScale: { borderColor: 'rgba(197, 203, 206, 0.3)' },
+      ...this.themedOptions(),
     });
     this.series = this.chart.addLineSeries({
       color: '#ab47bc', lineWidth: 2, priceLineVisible: false, lastValueVisible: true,

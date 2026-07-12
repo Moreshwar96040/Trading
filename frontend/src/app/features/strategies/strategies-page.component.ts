@@ -15,7 +15,7 @@ import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 
 import {
-  BacktestDetail, StrategyDefinition, StrategyInfo, StrategyRule,
+  BacktestDetail, SignalInfo, StrategyDefinition, StrategyInfo, StrategyRule,
 } from '../../core/models/market-data.models';
 import { MarketDataService } from '../../core/services/market-data.service';
 import { EquityChartComponent } from './equity-chart.component';
@@ -39,6 +39,39 @@ interface RuleDraft { left: string; op: string; right: string; }
             MatCheckboxModule, MatTableModule, MatProgressSpinnerModule, MatSnackBarModule,
             MatTooltipModule, EquityChartComponent],
   template: `
+    <!-- ============ live signals ============ -->
+    <mat-card appearance="outlined" class="signals-card">
+      <div class="list-header">
+        <h3>Live signals <span class="muted">· every strategy vs the latest bar</span></h3>
+        <button mat-stroked-button (click)="evaluateSignals()" [disabled]="busy()">
+          <mat-icon>bolt</mat-icon> Evaluate now
+        </button>
+      </div>
+      @if (signals().length) {
+        @for (s of signals(); track s.id) {
+          <div class="signal-row">
+            <span class="sig-chip" [class.entry]="s.signal === 'ENTRY'"
+                  [class.exit]="s.signal === 'EXIT'">{{ s.signal }}</span>
+            <span class="sig-ticker">{{ s.ticker }}</span>
+            <span class="muted sig-strategy">{{ s.strategyName }}</span>
+            <span class="muted">{{ s.asOfDate }}</span>
+            <span class="sig-close">₹{{ s.close | number: '1.2-2' }}</span>
+            <span class="sig-spacer"></span>
+            @if (s.signal === 'ENTRY') {
+              <button mat-flat-button color="primary" class="trade-btn"
+                      (click)="tradeSignal(s)" [disabled]="busy()"
+                      matTooltip="Risk-sized paper order with an AI-adaptive stop">
+                <mat-icon>rocket_launch</mat-icon> Trade it
+              </button>
+            }
+          </div>
+        }
+      } @else {
+        <p class="muted pad">No live signals — press “Evaluate now” after a data sync,
+          or loosen your strategy rules.</p>
+      }
+    </mat-card>
+
     <div class="layout">
       <!-- ============ strategy list ============ -->
       <mat-card appearance="outlined" class="list-card">
@@ -313,6 +346,21 @@ interface RuleDraft { left: string; op: string; right: string; }
   styles: `
     h3 { font-weight: 500; margin: 0 0 8px; }
     h4 { font-weight: 500; margin: 16px 0 8px; }
+    .signals-card { padding: 16px; margin-bottom: 16px; }
+    .signal-row { display: flex; align-items: center; gap: 14px; padding: 8px 4px;
+                  border-bottom: 1px solid var(--card-border); }
+    .signal-row:last-child { border-bottom: none; }
+    .sig-chip { font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+                padding: 3px 10px; border-radius: 999px; }
+    .sig-chip.entry { color: var(--up); background: rgba(38, 166, 154, 0.12);
+                      border: 1px solid rgba(38, 166, 154, 0.4); }
+    .sig-chip.exit { color: var(--down); background: rgba(239, 83, 80, 0.12);
+                     border: 1px solid rgba(239, 83, 80, 0.4); }
+    .sig-ticker { font-weight: 700; min-width: 100px; }
+    .sig-strategy { min-width: 180px; }
+    .sig-close { font-variant-numeric: tabular-nums; }
+    .sig-spacer { flex: 1; }
+    .trade-btn { height: 36px; }
     .layout { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
     .list-card { padding: 12px; }
     .list-header { display: flex; justify-content: space-between; align-items: center; }
@@ -356,6 +404,7 @@ export class StrategiesPageComponent implements OnInit {
   readonly selected = signal<StrategyInfo | null>(null);
   readonly busy = signal(false);
   readonly result = signal<BacktestDetail | null>(null);
+  readonly signals = signal<SignalInfo[]>([]);
 
   readonly entryRules = signal<RuleDraft[]>([{ left: 'sma_20', op: 'crosses_above', right: 'sma_50' }]);
   readonly exitRules = signal<RuleDraft[]>([]);
@@ -378,6 +427,79 @@ export class StrategiesPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.reload();
+    this.loadSignals();
+  }
+
+  loadSignals(): void {
+    this.api.listSignals().subscribe({
+      next: (list) => this.signals.set(list),
+      error: () => this.signals.set([]),
+    });
+  }
+
+  evaluateSignals(): void {
+    this.busy.set(true);
+    this.api.evaluateSignals().subscribe({
+      next: (res) => {
+        this.busy.set(false);
+        this.snackBar.open(`${res.signals} signal(s) fired`, undefined, { duration: 3000 });
+        this.loadSignals();
+      },
+      error: () => {
+        this.busy.set(false);
+        this.snackBar.open('Signal evaluation failed — is the data service up?', 'Dismiss',
+                           { duration: 5000 });
+      },
+    });
+  }
+
+  /** One-click: adaptive risk plan -> position size -> paper order tagged with the strategy. */
+  tradeSignal(sig: SignalInfo): void {
+    this.busy.set(true);
+    this.api.getAiRisk(sig.ticker).subscribe({
+      next: (risk) => {
+        this.api.calcPositionSize(risk.as_of_price, risk.stop_price).subscribe({
+          next: (size) => {
+            if (size.quantity < 1) {
+              this.busy.set(false);
+              this.snackBar.open('Risk sizing produced 0 shares — check risk settings', 'Dismiss',
+                                 { duration: 6000 });
+              return;
+            }
+            this.api.placePaperOrder(sig.ticker, 'BUY', size.quantity, {
+              strategyId: sig.strategyId,
+              stopPrice: risk.stop_price,
+              targetPrice: risk.take_profit_price,
+            }).subscribe({
+              next: (order) => {
+                this.busy.set(false);
+                if (order.status === 'FILLED') {
+                  this.snackBar.open(
+                    `Bought ${order.quantity} ${sig.ticker} @ ₹${order.price} · stop ₹${risk.stop_price}` +
+                    (risk.take_profit_price ? ` · target ₹${risk.take_profit_price}` : ' · trailing'),
+                    undefined, { duration: 6000 });
+                } else {
+                  this.snackBar.open(`Order rejected: ${order.rejectReason}`, 'Dismiss',
+                                     { duration: 6000 });
+                }
+              },
+              error: (err) => {
+                this.busy.set(false);
+                this.snackBar.open(err?.error?.message ?? 'Order failed', 'Dismiss', { duration: 6000 });
+              },
+            });
+          },
+          error: () => {
+            this.busy.set(false);
+            this.snackBar.open('Position sizing failed', 'Dismiss', { duration: 5000 });
+          },
+        });
+      },
+      error: () => {
+        this.busy.set(false);
+        this.snackBar.open('Adaptive risk service unavailable', 'Dismiss', { duration: 5000 });
+      },
+    });
   }
 
   selectedPreset(): StrategyPreset | undefined {

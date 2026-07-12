@@ -4,10 +4,11 @@ import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import {
-  AiPredictionRow, AlertInfo, BacktestDetail, BacktestRunParams, CandleSeries,
+  AiPredictionRow, AiRiskPlan, AlertInfo, BacktestDetail, BacktestRunParams, CandleSeries,
   FundamentalsData, IndicatorSeries, JournalEntry, PaperAccount, PaperOrder,
   PositionSizeResult, Quote, RiskReport, RiskSettings, ScreenRequest, ScreenRow,
-  ScreenerFieldsMeta, StrategyDefinition, StrategyInfo, SymbolInfo,
+  ScreenerFieldsMeta, SignalInfo, StrategyDefinition, StrategyInfo, StrategyScore,
+  SymbolInfo, TradeIdeasResponse,
 } from '../models/market-data.models';
 
 /** Single gateway to the backend API — components never build URLs themselves. */
@@ -78,6 +79,10 @@ export class MarketDataService {
     return this.http.delete<void>(`${this.base}/strategies/${id}`);
   }
 
+  getScoreboard(): Observable<StrategyScore[]> {
+    return this.http.get<StrategyScore[]>(`${this.base}/strategies/scoreboard`);
+  }
+
   runBacktest(strategyId: number, params: BacktestRunParams): Observable<{ backtest_id: number }> {
     return this.http.post<{ backtest_id: number }>(
       `${this.base}/strategies/${strategyId}/backtests`, params);
@@ -87,17 +92,46 @@ export class MarketDataService {
     return this.http.get<BacktestDetail>(`${this.base}/backtests/${id}`);
   }
 
+  // ---- live strategy signals ----------------------------------------------
+  listSignals(): Observable<SignalInfo[]> {
+    return this.http.get<SignalInfo[]>(`${this.base}/signals`);
+  }
+
+  evaluateSignals(): Observable<{ signals: number }> {
+    return this.http.post<{ signals: number }>(`${this.base}/signals/evaluate`, {});
+  }
+
   // ---- paper trading ------------------------------------------------------
   getPaperAccount(): Observable<PaperAccount> {
     return this.http.get<PaperAccount>(`${this.base}/paper/account`);
   }
 
-  placePaperOrder(ticker: string, side: 'BUY' | 'SELL', quantity: number): Observable<PaperOrder> {
-    return this.http.post<PaperOrder>(`${this.base}/paper/orders`, { ticker, side, quantity });
+  placePaperOrder(ticker: string, side: 'BUY' | 'SELL', quantity: number,
+                  riskPlan?: { strategyId?: number | null; stopPrice?: number | null;
+                               targetPrice?: number | null; }): Observable<PaperOrder> {
+    return this.http.post<PaperOrder>(`${this.base}/paper/orders`,
+      { ticker, side, quantity, ...riskPlan });
+  }
+
+  getAiIdeas(limit = 10): Observable<TradeIdeasResponse> {
+    return this.http.get<TradeIdeasResponse>(`${this.base}/ai/ideas`,
+      { params: new HttpParams().set('limit', limit) });
+  }
+
+  getAiRisk(ticker: string, entryPrice?: number): Observable<AiRiskPlan> {
+    const params = entryPrice ? new HttpParams().set('entryPrice', entryPrice) : new HttpParams();
+    return this.http.get<AiRiskPlan>(`${this.base}/ai/risk/${ticker}`, { params });
   }
 
   listPaperOrders(): Observable<PaperOrder[]> {
     return this.http.get<PaperOrder[]>(`${this.base}/paper/orders`);
+  }
+
+  managePositions(autoExit: boolean): Observable<{
+    positionsChecked: number; autoExit: boolean;
+    actions: { ticker: string; action: string; detail: string }[];
+  }> {
+    return this.http.post<never>(`${this.base}/paper/manage`, { autoExit });
   }
 
   resetPaperAccount(initialCash?: number): Observable<PaperAccount> {

@@ -183,6 +183,34 @@ export interface BacktestDetail {
   trades: BacktestTradeRow[];
 }
 
+export interface SignalInfo {
+  id: number;
+  strategyId: number;
+  strategyName: string;
+  ticker: string;
+  symbolName: string;
+  signal: 'ENTRY' | 'EXIT';
+  asOfDate: string;
+  close: number | null;
+  evaluatedAt: string;
+}
+
+export interface AiRiskPlan {
+  ticker?: string;
+  as_of_price: number;
+  atr: number;
+  atr_pct: number;
+  regime: 'STRONG_UPTREND' | 'UPTREND' | 'NEUTRAL' | 'DOWNTREND';
+  stop_price: number;
+  stop_pct: number;
+  atr_stop_mult: number;
+  trail: boolean;
+  take_profit_price: number | null;
+  take_profit_pct: number | null;
+  reward_risk: number | null;
+  rationale: string;
+}
+
 export interface PaperPosition {
   ticker: string;
   name: string;
@@ -191,6 +219,10 @@ export interface PaperPosition {
   lastPrice: number;
   marketValue: number;
   unrealizedPnl: number;
+  strategyId: number | null;
+  strategyName: string | null;
+  stopPrice: number | null;
+  targetPrice: number | null;
 }
 
 export interface PaperAccount {
@@ -215,6 +247,9 @@ export interface PaperOrder {
   status: 'FILLED' | 'REJECTED';
   rejectReason: string | null;
   placedAt: string;
+  strategyId: number | null;
+  stopPrice: number | null;
+  targetPrice: number | null;
 }
 
 export interface RiskSettings {
@@ -284,6 +319,35 @@ export interface AiPredictionRow {
   trainRows: number | null;
   modelName: string | null;
   trainedAt: string;
+}
+
+export interface StrategyScore {
+  strategyId: number;
+  name: string;
+  liveTrades: number;
+  liveWins: number;
+  liveWinRatePct: number | null;
+  livePnl: number;
+  backtestWinRatePct: number | null;
+  backtestTotalReturnPct: number | null;
+  verdict: 'ON_TRACK' | 'DECAYING' | 'NO_BACKTEST' | 'NOT_ENOUGH_DATA';
+}
+
+export interface TradeIdea {
+  ticker: string;
+  name: string;
+  score: number;
+  reasons: string[];
+  close: number | null;
+  as_of_date: string | null;
+  entry_strategies: string[];
+  risk_plan: AiRiskPlan | null;
+}
+
+export interface TradeIdeasResponse {
+  ideas: TradeIdea[];
+  symbols_scanned: number;
+  disclaimer: string;
 }
 
 export interface Quote {

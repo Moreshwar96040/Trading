@@ -1,11 +1,12 @@
 import {
-  AfterViewInit, Component, ElementRef, OnDestroy, ViewChild, effect, input,
+  AfterViewInit, Component, ElementRef, OnDestroy, ViewChild, effect, inject, input,
 } from '@angular/core';
 import {
   CandlestickData, HistogramData, IChartApi, ISeriesApi, LineData, Time, createChart,
 } from 'lightweight-charts';
 
 import { Candle } from '../../core/models/market-data.models';
+import { ThemeService } from '../../core/services/theme.service';
 
 export interface OverlayLine {
   id: string;          // stable key, e.g. 'sma_50'
@@ -33,6 +34,7 @@ export class CandlestickChartComponent implements AfterViewInit, OnDestroy {
   @ViewChild('chartHost', { static: true })
   private chartHost!: ElementRef<HTMLDivElement>;
 
+  private readonly theme = inject(ThemeService);
   private chart?: IChartApi;
   private candleSeries?: ISeriesApi<'Candlestick'>;
   private volumeSeries?: ISeriesApi<'Histogram'>;
@@ -49,6 +51,20 @@ export class CandlestickChartComponent implements AfterViewInit, OnDestroy {
       const lines = this.overlays();
       this.renderOverlays(lines);
     });
+    effect(() => {
+      this.theme.mode();                       // re-skin when the theme flips
+      this.chart?.applyOptions(this.themedOptions());
+    });
+  }
+
+  private themedOptions() {
+    const t = this.theme.chartTheme();
+    return {
+      layout: { background: { color: 'transparent' }, textColor: t.text },
+      grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
+      timeScale: { borderColor: t.border },
+      rightPriceScale: { borderColor: t.border },
+    };
   }
 
   ngAfterViewInit(): void {
@@ -56,16 +72,7 @@ export class CandlestickChartComponent implements AfterViewInit, OnDestroy {
     this.chart = createChart(host, {
       width: host.clientWidth,
       height: 480,
-      layout: {
-        background: { color: 'transparent' },
-        textColor: '#cfd8dc',
-      },
-      grid: {
-        vertLines: { color: 'rgba(197, 203, 206, 0.1)' },
-        horzLines: { color: 'rgba(197, 203, 206, 0.1)' },
-      },
-      timeScale: { borderColor: 'rgba(197, 203, 206, 0.3)' },
-      rightPriceScale: { borderColor: 'rgba(197, 203, 206, 0.3)' },
+      ...this.themedOptions(),
     });
 
     this.candleSeries = this.chart.addCandlestickSeries({

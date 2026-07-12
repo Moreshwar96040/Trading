@@ -93,6 +93,15 @@ def ai_train(body: SyncRequest, session: Session = Depends(get_session)) -> dict
     return train_all(session, tickers=body.tickers)
 
 
+@router.post("/internal/signals/evaluate")
+def signals_evaluate(body: dict | None = None,
+                     session: Session = Depends(get_session)) -> dict:
+    from app.services.signal_service import evaluate_signals
+    body = body or {}
+    return evaluate_signals(session, strategy_ids=body.get("strategy_ids"),
+                            tickers=body.get("tickers"))
+
+
 @router.get("/internal/ai/risk/{ticker}")
 def ai_risk(ticker: str,
             entry_price: float | None = None,
@@ -108,6 +117,12 @@ def ai_risk(ticker: str,
     except InsufficientDataError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"ticker": sym.ticker, **rec.to_dict()}
+
+
+@router.get("/internal/ai/ideas")
+def ai_ideas(limit: int = 10, session: Session = Depends(get_session)) -> dict:
+    from app.ai.ideas import build_ideas
+    return build_ideas(session, limit=max(1, min(limit, 50)))
 
 
 @router.post("/internal/alerts/evaluate")

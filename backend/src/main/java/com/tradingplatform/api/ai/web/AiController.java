@@ -59,4 +59,19 @@ public class AiController {
         List<String> tickers = body == null ? List.of() : body.getOrDefault("tickers", List.of());
         return marketData.trainAi(tickers);
     }
+
+    /** Ranked trade ideas: confluence of model, strategy signals, regime, quality. */
+    @GetMapping("/ideas")
+    public Map<String, Object> ideas(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "10") int limit) {
+        return marketData.getAiIdeas(limit);
+    }
+
+    /** Adaptive risk plan (regime + volatility scaled stop/target) for a symbol. */
+    @GetMapping("/risk/{ticker}")
+    public Map<String, Object> risk(@org.springframework.web.bind.annotation.PathVariable String ticker,
+                                    @org.springframework.web.bind.annotation.RequestParam(required = false)
+                                    BigDecimal entryPrice) {
+        return marketData.getAiRisk(ticker, entryPrice);
+    }
 }

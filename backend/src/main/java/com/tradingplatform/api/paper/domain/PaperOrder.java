@@ -49,8 +49,23 @@ public class PaperOrder {
     @Column(name = "placed_at")
     private Instant placedAt;
 
+    @Column(name = "strategy_id")
+    private Long strategyId;
+
+    @Column(name = "stop_price")
+    private BigDecimal stopPrice;
+
+    @Column(name = "target_price")
+    private BigDecimal targetPrice;
+
     protected PaperOrder() {
         // JPA
+    }
+
+    public void attachRiskPlan(Long strategyId, BigDecimal stopPrice, BigDecimal targetPrice) {
+        this.strategyId = strategyId;
+        this.stopPrice = stopPrice;
+        this.targetPrice = targetPrice;
     }
 
     private PaperOrder(Long accountId, Long symbolId, String side, Integer quantity) {
@@ -93,4 +108,7 @@ public class PaperOrder {
     public String getStatus() { return status; }
     public String getRejectReason() { return rejectReason; }
     public Instant getPlacedAt() { return placedAt; }
+    public Long getStrategyId() { return strategyId; }
+    public BigDecimal getStopPrice() { return stopPrice; }
+    public BigDecimal getTargetPrice() { return targetPrice; }
 }

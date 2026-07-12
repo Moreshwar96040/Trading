@@ -1,7 +1,9 @@
 import {
-  AfterViewInit, Component, ElementRef, OnDestroy, ViewChild, effect, input,
+  AfterViewInit, Component, ElementRef, OnDestroy, ViewChild, effect, inject, input,
 } from '@angular/core';
 import { IChartApi, ISeriesApi, LineData, Time, createChart } from 'lightweight-charts';
+
+import { ThemeService } from '../../core/services/theme.service';
 
 /** Portfolio equity curve (area-style line). */
 @Component({
@@ -19,6 +21,7 @@ export class EquityChartComponent implements AfterViewInit, OnDestroy {
   @ViewChild('host', { static: true })
   private host!: ElementRef<HTMLDivElement>;
 
+  private readonly theme = inject(ThemeService);
   private chart?: IChartApi;
   private series?: ISeriesApi<'Area'>;
   private resizeObserver?: ResizeObserver;
@@ -31,6 +34,20 @@ export class EquityChartComponent implements AfterViewInit, OnDestroy {
         this.chart?.timeScale().fitContent();
       }
     });
+    effect(() => {
+      this.theme.mode();
+      this.chart?.applyOptions(this.themedOptions());
+    });
+  }
+
+  private themedOptions() {
+    const t = this.theme.chartTheme();
+    return {
+      layout: { background: { color: 'transparent' }, textColor: t.text },
+      grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
+      rightPriceScale: { borderColor: t.border },
+      timeScale: { borderColor: t.border },
+    };
   }
 
   ngAfterViewInit(): void {
@@ -38,13 +55,7 @@ export class EquityChartComponent implements AfterViewInit, OnDestroy {
     this.chart = createChart(el, {
       width: el.clientWidth,
       height: 280,
-      layout: { background: { color: 'transparent' }, textColor: '#cfd8dc' },
-      grid: {
-        vertLines: { color: 'rgba(197, 203, 206, 0.08)' },
-        horzLines: { color: 'rgba(197, 203, 206, 0.08)' },
-      },
-      rightPriceScale: { borderColor: 'rgba(197, 203, 206, 0.3)' },
-      timeScale: { borderColor: 'rgba(197, 203, 206, 0.3)' },
+      ...this.themedOptions(),
     });
     this.series = this.chart.addAreaSeries({
       lineColor: '#4fc3f7',

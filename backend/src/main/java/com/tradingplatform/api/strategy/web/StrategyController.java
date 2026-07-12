@@ -1,6 +1,8 @@
 package com.tradingplatform.api.strategy.web;
 
 import com.tradingplatform.api.strategy.service.BacktestService;
+import com.tradingplatform.api.strategy.service.ScoreboardService;
+import com.tradingplatform.api.strategy.service.ScoreboardService.StrategyScore;
 import com.tradingplatform.api.strategy.service.StrategyService;
 import com.tradingplatform.api.strategy.web.dto.StrategyDtos.BacktestSummaryDto;
 import com.tradingplatform.api.strategy.web.dto.StrategyDtos.StrategyDto;
@@ -24,15 +26,24 @@ public class StrategyController {
 
     private final StrategyService strategyService;
     private final BacktestService backtestService;
+    private final ScoreboardService scoreboardService;
 
-    public StrategyController(StrategyService strategyService, BacktestService backtestService) {
+    public StrategyController(StrategyService strategyService, BacktestService backtestService,
+                              ScoreboardService scoreboardService) {
         this.strategyService = strategyService;
         this.backtestService = backtestService;
+        this.scoreboardService = scoreboardService;
     }
 
     @GetMapping
     public List<StrategyDto> list() {
         return strategyService.list();
+    }
+
+    /** Live paper performance vs backtest expectation, per strategy (drift detector). */
+    @GetMapping("/scoreboard")
+    public List<StrategyScore> scoreboard() {
+        return scoreboardService.scoreboard();
     }
 
     @GetMapping("/{id}")

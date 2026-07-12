@@ -7,4 +7,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface PaperOrderRepository extends JpaRepository<PaperOrder, Long> {
 
     List<PaperOrder> findTop200ByAccountIdOrderByPlacedAtDesc(Long accountId);
+
+    List<PaperOrder> findByStrategyIdIsNotNullAndStatus(String status);
 }

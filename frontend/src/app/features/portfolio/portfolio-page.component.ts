@@ -5,6 +5,7 @@ import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatCardModule } from '@angular/material/card';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
@@ -22,17 +23,42 @@ import { MarketDataService } from '../../core/services/market-data.service';
   selector: 'app-portfolio-page',
   standalone: true,
   imports: [CommonModule, FormsModule, ReactiveFormsModule, MatCardModule, MatButtonModule,
-            MatButtonToggleModule, MatFormFieldModule, MatInputModule, MatAutocompleteModule,
-            MatIconModule, MatTableModule, MatProgressSpinnerModule, MatSnackBarModule,
-            MatTooltipModule],
+            MatButtonToggleModule, MatCheckboxModule, MatFormFieldModule, MatInputModule,
+            MatAutocompleteModule, MatIconModule, MatTableModule, MatProgressSpinnerModule,
+            MatSnackBarModule, MatTooltipModule],
   template: `
     <div class="header-row">
       <h2>Paper Portfolio</h2>
-      <button mat-stroked-button color="warn" (click)="reset()"
-              matTooltip="Wipe positions, restore starting cash">
-        <mat-icon>restart_alt</mat-icon> Reset account
-      </button>
+      <div class="header-actions">
+        <mat-checkbox [(ngModel)]="autoExit"
+                      matTooltip="When on, stop/target hits SELL automatically (paper only). When off, they raise alerts.">
+          Auto-exit
+        </mat-checkbox>
+        <button mat-flat-button color="primary" (click)="manage()" [disabled]="busy()"
+                matTooltip="Ratchet trailing stops and act on stop/target hits (adaptive-risk engine)">
+          <mat-icon>smart_toy</mat-icon> Manage positions (AI)
+        </button>
+        <button mat-stroked-button color="warn" (click)="reset()"
+                matTooltip="Wipe positions, restore starting cash">
+          <mat-icon>restart_alt</mat-icon> Reset account
+        </button>
+      </div>
     </div>
+
+    @if (manageActions().length) {
+      <mat-card appearance="outlined" class="manage-card">
+        <h3>AI management actions</h3>
+        @for (act of manageActions(); track $index) {
+          <div class="manage-row">
+            <span class="act-chip" [class.up]="act.action.includes('RAISED') || act.action === 'PLAN_SET'"
+                  [class.down]="act.action.startsWith('EXITED') || act.action.includes('STOP_HIT')">
+              {{ act.action }}</span>
+            <b>{{ act.ticker }}</b>
+            <span class="muted">{{ act.detail }}</span>
+          </div>
+        }
+      </mat-card>
+    }
 
     @if (account(); as a) {
       <div class="cards">
@@ -119,6 +145,20 @@ import { MarketDataService } from '../../core/services/market-data.service';
               ₹{{ p.unrealizedPnl | number: '1.0-0' }}
             </td>
           </ng-container>
+          <ng-container matColumnDef="riskPlan">
+            <th mat-header-cell *matHeaderCellDef>Risk plan</th>
+            <td mat-cell *matCellDef="let p">
+              @if (p.stopPrice !== null) {
+                <span class="down">stop ₹{{ p.stopPrice | number: '1.2-2' }}</span>
+                @if (p.targetPrice !== null) {
+                  <span class="up"> · target ₹{{ p.targetPrice | number: '1.2-2' }}</span>
+                } @else { <span class="muted"> · trailing</span> }
+              } @else { <span class="muted">— run Manage</span> }
+              @if (p.strategyName) {
+                <div class="muted">via {{ p.strategyName }}</div>
+              }
+            </td>
+          </ng-container>
           <tr mat-header-row *matHeaderRowDef="positionColumns"></tr>
           <tr mat-row *matRowDef="let p; columns: positionColumns"></tr>
         </table>
@@ -180,6 +220,11 @@ import { MarketDataService } from '../../core/services/market-data.service';
   styles: `
     h2, h3 { font-weight: 500; }
     .header-row { display: flex; justify-content: space-between; align-items: center; }
+    .header-actions { display: flex; gap: 12px; align-items: center; }
+    .manage-card { padding: 14px; margin-bottom: 16px; }
+    .manage-row { display: flex; gap: 10px; align-items: baseline; padding: 4px 0; }
+    .act-chip { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em;
+                padding: 2px 8px; border-radius: 999px; border: 1px solid var(--card-border); }
     .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
              gap: 12px; margin-bottom: 16px; }
     .card { padding: 14px; display: flex; flex-direction: column; gap: 4px; }
@@ -202,16 +247,38 @@ export class PortfolioPageComponent implements OnInit {
   private readonly api = inject(MarketDataService);
   private readonly snackBar = inject(MatSnackBar);
 
-  readonly positionColumns = ['ticker', 'quantity', 'avgCost', 'lastPrice', 'marketValue', 'unrealizedPnl'];
+  readonly positionColumns = ['ticker', 'quantity', 'avgCost', 'lastPrice', 'marketValue',
+                              'unrealizedPnl', 'riskPlan'];
   readonly orderColumns = ['placedAt', 'ticker', 'side', 'quantity', 'price', 'status'];
 
   readonly account = signal<PaperAccount | null>(null);
   readonly orders = signal<PaperOrder[]>([]);
   readonly busy = signal(false);
+  readonly manageActions = signal<{ ticker: string; action: string; detail: string }[]>([]);
 
   readonly tickerControl = new FormControl('', { nonNullable: true });
   side: 'BUY' | 'SELL' = 'BUY';
   quantity = 1;
+  autoExit = false;
+
+  manage(): void {
+    this.busy.set(true);
+    this.api.managePositions(this.autoExit).subscribe({
+      next: (result) => {
+        this.busy.set(false);
+        this.manageActions.set(result.actions);
+        this.snackBar.open(
+          `${result.positionsChecked} position(s) checked · ${result.actions.length} action(s)`,
+          undefined, { duration: 4000 });
+        this.refresh();
+      },
+      error: (err) => {
+        this.busy.set(false);
+        this.snackBar.open(err?.error?.message ?? 'Position management failed', 'Dismiss',
+                           { duration: 5000 });
+      },
+    });
+  }
 
   readonly suggestions = toSignal(
     this.tickerControl.valueChanges.pipe(

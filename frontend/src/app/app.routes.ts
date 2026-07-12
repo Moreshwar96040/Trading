@@ -1,7 +1,13 @@
 import { Routes } from '@angular/router';
 
 export const routes: Routes = [
-  { path: '', pathMatch: 'full', redirectTo: 'chart' },
+  { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
+  {
+    path: 'dashboard',
+    loadComponent: () =>
+      import('./features/dashboard/dashboard-page.component')
+        .then((m) => m.DashboardPageComponent),
+  },
   {
     path: 'chart',
     loadComponent: () =>
@@ -50,5 +56,5 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./features/ai/ai-page.component').then((m) => m.AiPageComponent),
   },
-  { path: '**', redirectTo: 'chart' },
+  { path: '**', redirectTo: 'dashboard' },
 ];

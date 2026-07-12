@@ -1,12 +1,81 @@
 @use '@angular/material' as mat;
 
+// ============================================================================
+// Design system — dark-first fintech theme with a designed light counterpart.
+// One accent (cyan → indigo gradient) guides the eye; green/red are reserved
+// for P&L semantics. Glass surfaces, purposeful micro-interactions.
+// Theme switching: ThemeService toggles the `light` class on <html>.
+// ============================================================================
+
 html {
-  color-scheme: dark; // trading UIs live in the dark
+  color-scheme: dark; // dark is the default — trading UIs live in the dark
   @include mat.theme((
     color: mat.$azure-palette,
-    typography: Roboto,
+    typography: Inter,
     density: 0,
   ));
+
+  // ---- dark surface scale (designed, not inverted) ----
+  --mat-sys-surface: #070b14;
+  --mat-sys-surface-container-lowest: #060a12;
+  --mat-sys-surface-container-low: #0b111d;
+  --mat-sys-surface-container: #0e1524;
+  --mat-sys-surface-container-high: #131c2e;
+  --mat-sys-surface-container-highest: #182338;
+  --mat-sys-on-surface: #e2e8f0;
+  --mat-sys-on-surface-variant: #94a3b8;
+  --mat-sys-outline-variant: rgba(148, 163, 184, 0.16);
+  --mat-sys-primary: #38bdf8;
+  --mat-sys-on-primary: #04121f;
+
+  --accent: #38bdf8;
+  --accent-2: #818cf8;
+  --up: #26a69a;
+  --down: #ef5350;
+  --card-border: rgba(148, 163, 184, 0.12);
+  --card-glow: rgba(56, 189, 248, 0.28);
+  --card-shadow: 0 10px 30px -12px rgba(2, 6, 16, 0.9);
+  --glass-bg: rgba(14, 21, 36, 0.72);
+  --shell-glass: rgba(9, 13, 22, 0.65);
+  --text-dim: #94a3b8;
+  --title-from: #f1f5f9;
+  --title-to: #94a3b8;
+  --bg-glow-1: rgba(129, 140, 248, 0.13);
+  --bg-glow-2: rgba(56, 189, 248, 0.10);
+  --on-gradient: #061020;   // dark text on the bright cyan gradient
+}
+
+// ---- light theme: a deliberate cool-white palette, same accent language ------
+html.light {
+  color-scheme: light;
+
+  --mat-sys-surface: #eef2f9;
+  --mat-sys-surface-container-lowest: #ffffff;
+  --mat-sys-surface-container-low: #f7f9fd;
+  --mat-sys-surface-container: #ffffff;
+  --mat-sys-surface-container-high: #eef2f9;
+  --mat-sys-surface-container-highest: #e2e8f0;
+  --mat-sys-on-surface: #0f172a;
+  --mat-sys-on-surface-variant: #475569;
+  --mat-sys-outline-variant: rgba(15, 23, 42, 0.12);
+  --mat-sys-primary: #0369a1;
+  --mat-sys-on-primary: #ffffff;
+
+  --accent: #0284c7;
+  --accent-2: #6366f1;
+  --up: #0d9488;
+  --down: #dc2626;
+  --card-border: rgba(15, 23, 42, 0.08);
+  --card-glow: rgba(2, 132, 199, 0.3);
+  --card-shadow: 0 10px 26px -14px rgba(15, 23, 42, 0.25);
+  --glass-bg: rgba(255, 255, 255, 0.78);
+  --shell-glass: rgba(255, 255, 255, 0.72);
+  --text-dim: #64748b;
+  --title-from: #0f172a;
+  --title-to: #475569;
+  --bg-glow-1: rgba(99, 102, 241, 0.10);
+  --bg-glow-2: rgba(2, 132, 199, 0.08);
+  --on-gradient: #ffffff;   // white text on the deeper light-theme gradient
 }
 
 html, body {
@@ -15,7 +84,149 @@ html, body {
 }
 
 body {
-  font-family: Roboto, 'Helvetica Neue', sans-serif;
-  background: var(--mat-sys-surface);
+  font-family: Inter, Roboto, 'Helvetica Neue', sans-serif;
   color: var(--mat-sys-on-surface);
+  // ambient corner glows — the signature fintech backdrop
+  background:
+    radial-gradient(1100px 700px at 88% -12%, var(--bg-glow-1), transparent 60%),
+    radial-gradient(950px 650px at -12% 112%, var(--bg-glow-2), transparent 60%),
+    var(--mat-sys-surface);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  transition: background 0.3s ease, color 0.3s ease;
 }
+
+h1, h2, h3, h4 { letter-spacing: -0.015em; }
+
+::selection { background: rgba(56, 189, 248, 0.3); }
+
+// ---- custom scrollbars ------------------------------------------------------
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background-color: rgba(148, 163, 184, 0.45); }
+
+// ---- let the ambient background show through the shell ----------------------
+mat-sidenav-container, mat-sidenav-content { background: transparent !important; }
+
+// ---- glass cards -------------------------------------------------------------
+.mat-mdc-card {
+  border-radius: 16px !important;
+  border: 1px solid var(--card-border) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+    var(--glass-bg) !important;
+  backdrop-filter: blur(14px);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease,
+              background 0.3s ease;
+}
+.mat-mdc-card:hover {
+  border-color: var(--card-glow) !important;
+  box-shadow: var(--card-shadow), 0 0 0 1px rgba(56, 189, 248, 0.06);
+}
+
+// metric cards: lift + gradient hairline on top (used across pages)
+.metric {
+  position: relative;
+  overflow: hidden;
+}
+.metric::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2), transparent 80%);
+  opacity: 0.55;
+}
+.metric:hover { transform: translateY(-3px); }
+.metric-value { font-weight: 700 !important; }
+
+// ---- numbers read like a terminal -------------------------------------------
+.metric-value, .quote-price, .quote-change, td.mat-mdc-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+// ---- tables -------------------------------------------------------------------
+.mat-mdc-table { background: transparent !important; }
+.mat-mdc-header-cell {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim) !important;
+  border-bottom-color: var(--card-border) !important;
+}
+.mat-mdc-cell { border-bottom-color: var(--card-border) !important; }
+.mat-mdc-row { transition: background 0.15s ease; }
+.mat-mdc-row:hover { background: rgba(56, 189, 248, 0.055); }
+
+// ---- chips: interactive pills -------------------------------------------------
+.mat-mdc-chip {
+  border-radius: 999px !important;
+  border: 1px solid var(--card-border);
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+.mat-mdc-chip:hover {
+  border-color: var(--card-glow);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px -6px rgba(56, 189, 248, 0.4);
+}
+
+// ---- primary buttons get the brand gradient -----------------------------------
+.mat-mdc-unelevated-button.mat-primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)) !important;
+  color: var(--on-gradient) !important;
+  font-weight: 600;
+  transition: box-shadow 0.2s ease, transform 0.2s ease, filter 0.2s ease;
+}
+.mat-mdc-unelevated-button.mat-primary:hover:not([disabled]) {
+  box-shadow: 0 6px 20px -6px rgba(56, 189, 248, 0.55);
+  filter: brightness(1.08);
+}
+.mat-mdc-unelevated-button.mat-primary:active:not([disabled]) { transform: scale(0.98); }
+
+.mat-mdc-outlined-button { border-color: var(--card-border) !important; }
+.mat-mdc-outlined-button:hover { border-color: var(--card-glow) !important; }
+
+// softer field corners
+html { --mdc-outlined-text-field-container-shape: 12px; }
+
+// button toggles (chart ranges / overlays) as segmented glass controls
+.mat-button-toggle-group {
+  border-radius: 12px !important;
+  border: 1px solid var(--card-border) !important;
+  background: var(--glass-bg);
+  overflow: hidden;
+}
+.mat-button-toggle-checked {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.22), rgba(129, 140, 248, 0.18)) !important;
+  color: var(--accent) !important;
+}
+
+// ---- page transition: every routed view rises in ------------------------------
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+mat-sidenav-content > :not(router-outlet) {
+  display: block;
+  animation: pageIn 0.4s cubic-bezier(0.22, 0.9, 0.3, 1) both;
+}
+
+// staggered entrance for metric card grids
+.metric-cards > * { animation: pageIn 0.45s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
+.metric-cards > *:nth-child(2) { animation-delay: 0.05s; }
+.metric-cards > *:nth-child(3) { animation-delay: 0.1s; }
+.metric-cards > *:nth-child(4) { animation-delay: 0.15s; }
+.metric-cards > *:nth-child(5) { animation-delay: 0.2s; }
+.metric-cards > *:nth-child(6) { animation-delay: 0.25s; }
+.metric-cards > *:nth-child(7) { animation-delay: 0.3s; }
+
+// ---- semantic P&L colors everywhere ------------------------------------------
+.up { color: var(--up) !important; }
+.down { color: var(--down) !important; }

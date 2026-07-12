@@ -36,8 +36,38 @@ public class PaperPosition {
     @Column(name = "updated_at")
     private Instant updatedAt;
 
+    @Column(name = "strategy_id")
+    private Long strategyId;
+
+    @Column(name = "stop_price")
+    private BigDecimal stopPrice;
+
+    @Column(name = "target_price")
+    private BigDecimal targetPrice;
+
     protected PaperPosition() {
         // JPA
+    }
+
+    public void applyRiskPlan(Long strategyId, BigDecimal stopPrice, BigDecimal targetPrice) {
+        if (strategyId != null) this.strategyId = strategyId;
+        if (stopPrice != null) this.stopPrice = stopPrice;
+        if (targetPrice != null) this.targetPrice = targetPrice;
+    }
+
+    /** Self-adjusting stop: only ever moves up (locks in gains, never widens risk). */
+    public boolean raiseStop(BigDecimal newStop) {
+        if (newStop == null || (stopPrice != null && newStop.compareTo(stopPrice) <= 0)) {
+            return false;
+        }
+        this.stopPrice = newStop;
+        return true;
+    }
+
+    private void clearRiskPlan() {
+        this.strategyId = null;
+        this.stopPrice = null;
+        this.targetPrice = null;
     }
 
     public PaperPosition(Long accountId, Long symbolId) {
@@ -62,6 +92,7 @@ public class PaperPosition {
         this.quantity = this.quantity - sellQty;
         if (this.quantity == 0) {
             this.avgCost = BigDecimal.ZERO;
+            clearRiskPlan();
         }
     }
 
@@ -77,4 +108,7 @@ public class PaperPosition {
     public Integer getQuantity() { return quantity; }
     public BigDecimal getAvgCost() { return avgCost; }
     public Instant getUpdatedAt() { return updatedAt; }
+    public Long getStrategyId() { return strategyId; }
+    public BigDecimal getStopPrice() { return stopPrice; }
+    public BigDecimal getTargetPrice() { return targetPrice; }
 }

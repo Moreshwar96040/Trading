@@ -29,6 +29,9 @@ def _run_sync_job() -> None:
         alerts = evaluate_alerts(session)
         log.info("Alerts evaluated: %d checked, %d triggered", alerts["checked"],
                  alerts["triggered"])
+        from app.services.signal_service import evaluate_signals
+        sig = evaluate_signals(session)
+        log.info("Strategy signals evaluated: %d fired", sig["signals"])
     except Exception:
         log.exception("Scheduled sync crashed")
     finally:
