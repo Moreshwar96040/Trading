@@ -32,7 +32,7 @@ const SERIES_HINTS = ['close', 'open', 'high', 'low', 'volume', 'sma_20', 'sma_5
   'ichimoku_senkou_a', 'ichimoku_senkou_b', 'ichimoku_cloud_top',
   'ichimoku_cloud_bottom', 'support', 'resistance'];
 const OPS = ['gt', 'gte', 'lt', 'lte', 'crosses_above', 'crosses_below'] as const;
-const TIMEFRAMES = ['daily', 'weekly', 'monthly'] as const;
+const TIMEFRAMES = ['15m', 'daily', 'weekly', 'monthly'] as const;
 
 interface RuleDraft { left: string; op: string; right: string; }
 
@@ -447,7 +447,7 @@ export class StrategiesPageComponent implements OnInit {
   capital = 1_000_000;
   maxPositions = 5;
   commissionPct = 0.05;
-  timeframe: 'daily' | 'weekly' | 'monthly' = 'daily';
+  timeframe: '15m' | 'daily' | 'weekly' | 'monthly' = 'daily';
   presetName = '';
 
   ngOnInit(): void {
@@ -512,6 +512,22 @@ export class StrategiesPageComponent implements OnInit {
 
   refreshData(): void {
     this.busy.set(true);
+    // 15m timeframe pulls Yahoo's rolling 60-day intraday window instead.
+    if (this.timeframe === '15m') {
+      this.api.triggerIntradaySync([], '15m').subscribe({
+        next: () => {
+          this.busy.set(false);
+          this.snackBar.open('Intraday bars synced (Yahoo keeps ~60 days of 15m data)',
+                             undefined, { duration: 4000 });
+        },
+        error: () => {
+          this.busy.set(false);
+          this.snackBar.open('Intraday sync failed — check the data service', 'Dismiss',
+                             { duration: 5000 });
+        },
+      });
+      return;
+    }
     // Pass the backtest From date so the sync backfills history that far back,
     // not just the forward gap since the last stored bar.
     const from = this.iso(this.fromDate);

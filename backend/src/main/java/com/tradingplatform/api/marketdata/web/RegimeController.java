@@ -35,6 +35,19 @@ public class RegimeController {
         return marketData.getAiUsage();
     }
 
+    /** GET /api/v1/momentum/board — sector rotation heat + RS leaders. */
+    @GetMapping("/momentum/board")
+    public Map<String, Object> momentumBoard() {
+        return marketData.getMomentumBoard();
+    }
+
+    /** GET /api/v1/symbols/lookup?q= — search all NSE stocks (local DB + Yahoo). */
+    @GetMapping("/symbols/lookup")
+    public Map<String, Object> lookupSymbols(
+            @org.springframework.web.bind.annotation.RequestParam String q) {
+        return marketData.lookupSymbols(q);
+    }
+
     /** GET /api/v1/alpha/stack?ticker= — conviction-ranked live setups. */
     @GetMapping("/alpha/stack")
     public Map<String, Object> alphaStack(

@@ -28,6 +28,10 @@ _SR_NAMES = {"support", "resistance"}
 FUNDAMENTAL_FIELDS = {"roe_pct", "pe_trailing", "pe_forward", "pb", "ps",
                       "debt_to_equity", "profit_margin_pct", "operating_margin_pct",
                       "revenue_growth_pct", "earnings_growth_pct", "dividend_yield_pct"}
+#: Cross-sectional series, injected point-in-time by the backtest service.
+#: rs_rank = 0-100 relative-strength percentile vs the tested universe at each
+#: bar, built only from trailing returns — safe (no lookahead) in rules.
+CROSS_SECTIONAL_FIELDS = {"rs_rank"}
 
 
 class RuleError(ValueError):
@@ -37,8 +41,18 @@ class RuleError(ValueError):
 def is_valid_series(name: str) -> bool:
     return (name in _PRICE_COLUMNS or name in _MACD_NAMES or name in _BB_NAMES
             or name in _ICHIMOKU_NAMES or name in _SR_NAMES
-            or name in FUNDAMENTAL_FIELDS
+            or name in FUNDAMENTAL_FIELDS or name in CROSS_SECTIONAL_FIELDS
             or _PARAM_PATTERN.match(name) is not None)
+
+
+def cross_sectional_fields_used(rules: list[dict]) -> set[str]:
+    """Which cross-sectional fields (rs_rank, ...) appear in a rule list."""
+    used: set[str] = set()
+    for rule in rules or []:
+        for operand in (rule.get("left"), rule.get("right")):
+            if isinstance(operand, str) and operand in CROSS_SECTIONAL_FIELDS:
+                used.add(operand)
+    return used
 
 
 def fundamental_fields_used(rules: list[dict]) -> set[str]:
@@ -84,6 +98,11 @@ def resolve_series(df: pd.DataFrame, name: str) -> pd.Series:
             return df[name].astype(float)
         raise RuleError(f"'{name}' needs stored fundamentals for this symbol — "
                         "refresh fundamentals first (POST /api/v1/sync/fundamentals)")
+    if name in CROSS_SECTIONAL_FIELDS:
+        if name in df.columns:
+            return df[name].astype(float)
+        raise RuleError(f"'{name}' is cross-sectional — it is only available inside "
+                        "backtests (the service injects it per universe)")
     match = _PARAM_PATTERN.match(name)
     if match:
         kind, period = match.group(1), int(match.group(2))

@@ -48,6 +48,20 @@ def run_sync(body: SyncRequest,
                                    start_date=body.from_date))
 
 
+@router.post("/internal/sync/intraday")
+def run_intraday_sync(body: dict | None = None,
+                      session: Session = Depends(get_session),
+                      provider: MarketDataProvider = Depends(get_provider)) -> dict:
+    """Pull the latest ~60 days of intraday bars (default 15m) from Yahoo."""
+    from app.services.intraday_service import sync_intraday
+    body = body or {}
+    try:
+        return sync_intraday(session, provider, tickers=body.get("tickers"),
+                             interval=body.get("interval") or "15m")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/internal/symbols/seed", response_model=SeedSymbolResponse)
 def seed_symbol(body: SeedSymbolRequest,
                 session: Session = Depends(get_session),
@@ -210,6 +224,58 @@ def review_leaks(session: Session = Depends(get_session),
     data = compute_leaks(session)
     data["narrative"] = leaks_narrative(session, settings, data)
     return data
+
+
+@router.get("/internal/symbols/lookup")
+def symbols_lookup(q: str, session: Session = Depends(get_session)) -> dict:
+    """Search ALL NSE stocks: local DB matches first, then Yahoo Finance's symbol
+    search for anything not yet tracked (marked in_db=false so the UI can offer
+    to add-and-analyze)."""
+    import httpx
+
+    term = q.strip()
+    if not term:
+        return {"results": []}
+
+    local = session.scalars(
+        select(Symbol).where(Symbol.active)
+        .where((Symbol.ticker.ilike(f"%{term}%")) | (Symbol.name.ilike(f"%{term}%")))
+        .limit(8)).all()
+    results = [{"ticker": s.ticker, "name": s.name, "sector": s.sector, "in_db": True}
+               for s in local]
+    seen = {s.ticker for s in local}
+
+    try:
+        resp = httpx.get(
+            "https://query2.finance.yahoo.com/v1/finance/search",
+            params={"q": term, "quotesCount": 10, "newsCount": 0},
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=6.0)
+        quotes = resp.json().get("quotes", []) if resp.status_code == 200 else []
+    except Exception as exc:                       # noqa: BLE001 — lookup is best-effort
+        log.warning("Yahoo symbol search failed: %s", exc)
+        quotes = []
+
+    for quote_item in quotes:
+        symbol = quote_item.get("symbol", "")
+        if not symbol.endswith(".NS") or quote_item.get("quoteType") != "EQUITY":
+            continue                                # NSE equities only
+        ticker = symbol[:-3].upper()
+        if ticker in seen:
+            continue
+        seen.add(ticker)
+        results.append({"ticker": ticker,
+                        "name": quote_item.get("longname")
+                        or quote_item.get("shortname") or ticker,
+                        "sector": quote_item.get("sector"),
+                        "in_db": False})
+    return {"results": results[:12]}
+
+
+@router.get("/internal/momentum/board")
+def momentum_board_endpoint(session: Session = Depends(get_session)) -> dict:
+    """Momentum Engine: sector rotation heat + relative-strength leaders."""
+    from app.services.momentum_service import momentum_board
+    return momentum_board(session)
 
 
 @router.get("/internal/alpha/stack")

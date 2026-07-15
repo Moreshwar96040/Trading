@@ -21,6 +21,9 @@ MIN_BARS = 5
 #: Weekly/monthly bars let the same swing strategies be tested on higher timeframes
 #: without any new data (bars are aggregated from the stored dailies).
 TIMEFRAMES = {"daily": None, "weekly": "W-FRI", "monthly": "ME"}
+#: Intraday timeframes load from ohlcv_intraday instead of the daily table.
+#: Yahoo free tier keeps ~60 days of 15m bars — the coverage note says so.
+INTRADAY_TIMEFRAMES = {"15m", "30m", "60m"}
 
 
 def resample_ohlcv(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
@@ -133,8 +136,10 @@ def _execute(session: Session, strategy: Strategy, record: Backtest, params: dic
     from_date = date.fromisoformat(params["from"]) if params.get("from") else None
     to_date = date.fromisoformat(params["to"]) if params.get("to") else None
     timeframe = (params.get("timeframe") or "daily").lower()
-    if timeframe not in TIMEFRAMES:
-        raise ValueError(f"Unknown timeframe '{timeframe}' (use {sorted(TIMEFRAMES)})")
+    if timeframe not in TIMEFRAMES and timeframe not in INTRADAY_TIMEFRAMES:
+        raise ValueError(f"Unknown timeframe '{timeframe}' "
+                         f"(use {sorted(TIMEFRAMES) + sorted(INTRADAY_TIMEFRAMES)})")
+    intraday = timeframe in INTRADAY_TIMEFRAMES
 
     stmt = select(Symbol).where(Symbol.active)
     if params.get("tickers"):
@@ -154,15 +159,26 @@ def _execute(session: Session, strategy: Strategy, record: Backtest, params: dic
     data = {}
     earliest_stored: date | None = None
     for sym in symbols:
-        # Earliest bar on record (ignoring the window) so error/coverage messages
-        # can say how far back stored history actually goes.
-        sym_earliest = session.scalar(
-            select(func.min(OhlcvDaily.trade_date)).where(OhlcvDaily.symbol_id == sym.id))
-        if sym_earliest is not None:
-            earliest_stored = sym_earliest if earliest_stored is None else min(earliest_stored, sym_earliest)
-        raw = load_ohlcv(session, sym.id, until=to_date)
-        df = raw[raw["trade_date"] >= from_date] if from_date is not None else raw
-        frame = resample_ohlcv(df.set_index("trade_date"), timeframe)
+        if intraday:
+            from app.services.intraday_service import load_intraday
+            raw_intra = load_intraday(session, sym.id, interval=timeframe)
+            if raw_intra.empty:
+                continue
+            if from_date is not None:
+                raw_intra = raw_intra[raw_intra["ts"].dt.date >= from_date]
+            if to_date is not None:
+                raw_intra = raw_intra[raw_intra["ts"].dt.date <= to_date]
+            frame = raw_intra.set_index("ts")
+        else:
+            # Earliest bar on record (ignoring the window) so error/coverage messages
+            # can say how far back stored history actually goes.
+            sym_earliest = session.scalar(
+                select(func.min(OhlcvDaily.trade_date)).where(OhlcvDaily.symbol_id == sym.id))
+            if sym_earliest is not None:
+                earliest_stored = sym_earliest if earliest_stored is None else min(earliest_stored, sym_earliest)
+            raw = load_ohlcv(session, sym.id, until=to_date)
+            df = raw[raw["trade_date"] >= from_date] if from_date is not None else raw
+            frame = resample_ohlcv(df.set_index("trade_date"), timeframe)
         if len(frame) < MIN_BARS:
             continue
         if fundamental_fields:
@@ -175,6 +191,9 @@ def _execute(session: Session, strategy: Strategy, record: Backtest, params: dic
             frame = frame.assign(**{f: float(v) for f, v in values.items()})
         data[sym.ticker] = frame
     if not data:
+        if intraday:
+            raise ValueError(f"No {timeframe} bars stored — run an intraday sync first "
+                             "(POST /api/v1/sync/intraday). Yahoo keeps ~60 days of 15m data.")
         if earliest_stored is not None and from_date is not None:
             hint = (f"stored history only starts {earliest_stored.isoformat()}; run a sync "
                     f"with from_date={from_date.isoformat()} (or click 'Sync latest data' "
@@ -183,6 +202,18 @@ def _execute(session: Session, strategy: Strategy, record: Backtest, params: dic
             hint = "run a daily sync first"
         raise ValueError(f"No price data in the requested window — {hint} "
                          "(POST /api/v1/sync/daily)")
+
+    # rs_rank: point-in-time cross-sectional momentum percentile across the tested
+    # universe. Built from trailing returns only — zero lookahead by construction.
+    from app.backtest.rules import cross_sectional_fields_used
+    uses_rs = bool(cross_sectional_fields_used(definition.get("entry"))
+                   | cross_sectional_fields_used(definition.get("exit")))
+    if uses_rs:
+        from app.services.momentum_service import rs_rank_panel
+        closes = pd.DataFrame({t: df["close"].astype(float) for t, df in data.items()})
+        ranks = rs_rank_panel(closes)
+        for t in data:
+            data[t] = data[t].assign(rs_rank=ranks[t].reindex(data[t].index))
 
     # The DB only ever holds what a prior sync fetched; a "from" earlier than the oldest
     # stored bar isn't a filtering bug, it just has nothing to filter — surface it instead
@@ -199,6 +230,17 @@ def _execute(session: Session, strategy: Strategy, record: Backtest, params: dic
                 "stored ratios across all past bars — a quality screen, not point-in-time data."
                 + (f" Skipped (no fundamentals): {', '.join(skipped_no_fundamentals)}."
                    if skipped_no_fundamentals else ""))
+        data_coverage_note = f"{data_coverage_note} {note}" if data_coverage_note else note
+    if uses_rs:
+        note = (f"rs_rank is the point-in-time momentum percentile within the "
+                f"{len(data)} tested symbols (trailing returns only — no lookahead).")
+        data_coverage_note = f"{data_coverage_note} {note}" if data_coverage_note else note
+    if intraday:
+        n_bars = max(len(df) for df in data.values())
+        note = (f"Intraday ({timeframe}) backtest over ~{n_bars} bars ≈ Yahoo's free "
+                "60-day window. Enough to trade a setup — statistically too little to "
+                "trust it; treat the robustness verdict as provisional. "
+                "max_holding_days counts BARS on this timeframe.")
         data_coverage_note = f"{data_coverage_note} {note}" if data_coverage_note else note
 
     engine_params = BacktestParams(
@@ -221,6 +263,10 @@ def _execute(session: Session, strategy: Strategy, record: Backtest, params: dic
 
     metrics["robustness"] = _robustness_check(data, definition, engine_params, result)
 
+    def _as_date(value):
+        """Intraday bars index by timestamp; the trades table stores dates."""
+        return value.date() if isinstance(value, (datetime, pd.Timestamp)) else value
+
     record.status = "SUCCESS"
     record.finished_at = datetime.now(timezone.utc)
     record.metrics = metrics
@@ -228,8 +274,10 @@ def _execute(session: Session, strategy: Strategy, record: Backtest, params: dic
                            for d, v in result.equity_curve.items()]
     for trade in result.trades:
         session.add(BacktestTrade(
-            backtest_id=record.id, ticker=trade.ticker, entry_date=trade.entry_date,
-            entry_price=trade.entry_price, exit_date=trade.exit_date,
+            backtest_id=record.id, ticker=trade.ticker,
+            entry_date=_as_date(trade.entry_date),
+            entry_price=trade.entry_price,
+            exit_date=_as_date(trade.exit_date),
             exit_price=trade.exit_price, quantity=trade.quantity, pnl=trade.pnl,
             pnl_pct=trade.pnl_pct, exit_reason=trade.exit_reason))
 

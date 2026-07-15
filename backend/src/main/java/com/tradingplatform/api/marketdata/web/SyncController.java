@@ -33,6 +33,17 @@ public class SyncController {
         return marketData.syncDaily(tickers, from);
     }
 
+    /** POST /api/v1/sync/intraday  body: {"tickers": [...], "interval": "15m"} —
+     *  pull Yahoo's rolling ~60-day intraday window. */
+    @PostMapping("/intraday")
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> syncIntraday(@RequestBody(required = false) Map<String, Object> body) {
+        List<String> tickers = body != null && body.get("tickers") instanceof List<?> list
+                ? (List<String>) list : List.of();
+        String interval = body != null && body.get("interval") instanceof String s ? s : "15m";
+        return marketData.syncIntraday(tickers, interval);
+    }
+
     /** POST /api/v1/sync/csv-import — one-time import of the local dataset. */
     @PostMapping("/csv-import")
     public SyncSummaryDto csvImport() {

@@ -14,6 +14,50 @@ export interface StrategyPreset {
  */
 export const STRATEGY_PRESETS: StrategyPreset[] = [
   {
+    name: 'Momentum Leader (RS + trend + breakout)',
+    description: 'The Momentum Engine as a strategy: only top-quartile relative-strength '
+      + 'stocks (rs_rank > 75), in a confirmed uptrend (close > SMA-200, SMA-50 > SMA-200), '
+      + 'entered on a new-highs breakout above resistance. '
+      + 'ATR trailing stop rides the winner; RS decay below 50 is the exit tell. '
+      + 'rs_rank is computed point-in-time — this backtest has no lookahead.',
+    definition: {
+      entry: [
+        { left: 'rs_rank', op: 'gt', right: 75 },              // a leader, not a laggard
+        { left: 'close', op: 'gt', right: 'sma_200' },         // long-term uptrend
+        { left: 'sma_50', op: 'gt', right: 'sma_200' },        // trend structure aligned
+        { left: 'close', op: 'crosses_above', right: 'resistance' },  // the trigger
+      ],
+      exit: [
+        { left: 'rs_rank', op: 'lt', right: 50 },              // leadership lost = thesis dead
+      ],
+      stop_loss_pct: null,
+      take_profit_pct: null,
+      max_holding_days: null,
+      atr_stop_mult: 3,
+      atr_trail: true,                                          // ratchet up, never down
+    },
+  },
+  {
+    name: 'Momentum Pullback (buy leaders on weakness)',
+    description: 'Strong stocks (rs_rank > 80) in uptrends, bought on a short-term RSI dip '
+      + 'below 45 instead of chased at highs — the lower-risk momentum entry. Exits when '
+      + 'the bounce matures (RSI > 70) or after 30 bars, with a 2.5× ATR safety stop.',
+    definition: {
+      entry: [
+        { left: 'rs_rank', op: 'gt', right: 80 },
+        { left: 'close', op: 'gt', right: 'sma_200' },
+        { left: 'sma_50', op: 'gt', right: 'sma_200' },
+        { left: 'rsi_14', op: 'lt', right: 45 },
+      ],
+      exit: [{ left: 'rsi_14', op: 'gt', right: 70 }],
+      stop_loss_pct: null,
+      take_profit_pct: null,
+      max_holding_days: 30,
+      atr_stop_mult: 2.5,
+      atr_trail: false,
+    },
+  },
+  {
     name: 'Ichimoku Cloud Breakout',
     description: 'Enter when price closes above the cloud with a bullish Tenkan/Kijun; exit back below the Kijun. Classic long-swing trend rider.',
     definition: {
@@ -64,6 +108,154 @@ export const STRATEGY_PRESETS: StrategyPreset[] = [
       stop_loss_pct: 10,
       take_profit_pct: null,
       max_holding_days: null,
+    },
+  },
+  {
+    name: 'Intraday 15m: EMA momentum burst',
+    description: 'Run with the 15m timeframe. Fast EMA-9 crosses above EMA-21 with RSI '
+      + 'confirming (> 55) — a momentum burst entry. Exits on the reverse cross or after '
+      + '25 bars (one session), guarded by a tight 1.5× ATR stop. Sync intraday data first; '
+      + 'Yahoo only keeps ~60 days, so treat the backtest as a sketch, not proof.',
+    definition: {
+      entry: [
+        { left: 'ema_9', op: 'crosses_above', right: 'ema_21' },
+        { left: 'rsi_14', op: 'gt', right: 55 },
+      ],
+      exit: [{ left: 'ema_9', op: 'crosses_below', right: 'ema_21' }],
+      stop_loss_pct: null,
+      take_profit_pct: null,
+      max_holding_days: 25,               // bars on the 15m timeframe ≈ one session
+      atr_stop_mult: 1.5,
+      atr_trail: true,
+    },
+  },
+  {
+    name: 'Intraday 15m: VWAP-style band fade',
+    description: 'Run with the 15m timeframe. Mean-reversion scalp: price stretched below '
+      + 'the lower Bollinger band snaps back toward the 20-bar mean (a VWAP-like anchor '
+      + 'on 15m bars). Time-boxed to 12 bars (~3 hours) with a 1.2× ATR stop — intraday '
+      + 'mean reversion must be fast or wrong.',
+    definition: {
+      entry: [
+        { left: 'close', op: 'lt', right: 'bb_lower' },
+        { left: 'rsi_14', op: 'lt', right: 30 },
+      ],
+      exit: [{ left: 'close', op: 'crosses_above', right: 'bb_mid' }],
+      stop_loss_pct: null,
+      take_profit_pct: null,
+      max_holding_days: 12,               // bars ≈ 3 hours on 15m
+      atr_stop_mult: 1.2,
+      atr_trail: false,
+    },
+  },
+  {
+    name: 'Turtle Breakout (Donchian style)',
+    description: 'The famous Turtle Traders system, adapted: buy the breakout above the '
+      + 'last confirmed swing high, exit on a close below swing support, risk managed by '
+      + 'the classic 2× ATR stop. Pure trend-following — expect many small losses and a '
+      + 'few very large winners; judge it on expectancy, not win rate.',
+    definition: {
+      entry: [
+        { left: 'close', op: 'crosses_above', right: 'resistance' },
+      ],
+      exit: [{ left: 'close', op: 'crosses_below', right: 'support' }],
+      stop_loss_pct: null,
+      take_profit_pct: null,
+      max_holding_days: null,
+      atr_stop_mult: 2,
+      atr_trail: false,
+    },
+  },
+  {
+    name: 'MACD Momentum Cross',
+    description: 'Gerald Appel\'s classic: MACD line crosses above its signal line, '
+      + 'filtered to long-term uptrends only (close > SMA-200) to avoid counter-trend '
+      + 'whipsaws. Exit on the reverse cross.',
+    definition: {
+      entry: [
+        { left: 'macd', op: 'crosses_above', right: 'macd_signal' },
+        { left: 'close', op: 'gt', right: 'sma_200' },
+      ],
+      exit: [{ left: 'macd', op: 'crosses_below', right: 'macd_signal' }],
+      stop_loss_pct: 7,
+      take_profit_pct: null,
+      max_holding_days: null,
+    },
+  },
+  {
+    name: 'Connors RSI-2 (mean reversion)',
+    description: 'Larry Connors\' famous short-term dip-buy: in a long-term uptrend '
+      + '(close > SMA-200), buy an extreme 2-period RSI washout (< 10), exit when price '
+      + 'recovers its 5-day average. High win rate, small wins — the anti-Turtle. '
+      + 'Works best on liquid large caps.',
+    definition: {
+      entry: [
+        { left: 'close', op: 'gt', right: 'sma_200' },
+        { left: 'rsi_2', op: 'lt', right: 10 },
+      ],
+      exit: [{ left: 'close', op: 'crosses_above', right: 'sma_5' }],
+      stop_loss_pct: 5,
+      take_profit_pct: null,
+      max_holding_days: 10,
+    },
+  },
+  {
+    name: 'Bollinger Snapback',
+    description: 'John Bollinger\'s bands as a mean-reversion tool: buy a close below '
+      + 'the lower band inside an uptrend, exit at the middle band (the 20-day mean). '
+      + 'Time-boxed to 15 bars so dead trades don\'t linger.',
+    definition: {
+      entry: [
+        { left: 'close', op: 'lt', right: 'bb_lower' },
+        { left: 'close', op: 'gt', right: 'sma_200' },
+      ],
+      exit: [{ left: 'close', op: 'crosses_above', right: 'bb_mid' }],
+      stop_loss_pct: 6,
+      take_profit_pct: null,
+      max_holding_days: 15,
+    },
+  },
+  {
+    name: 'Minervini Trend Template (lite)',
+    description: 'Mark Minervini\'s SEPA stage-2 checklist, expressed in rules: price '
+      + 'above a rising ladder of moving averages (50 > 150 > 200), top-tier relative '
+      + 'strength (rs_rank > 70), entered on a breakout above resistance. Exit when the '
+      + '50-day breaks — stage 2 is over.',
+    definition: {
+      entry: [
+        { left: 'close', op: 'gt', right: 'sma_50' },
+        { left: 'sma_50', op: 'gt', right: 'sma_150' },
+        { left: 'sma_150', op: 'gt', right: 'sma_200' },
+        { left: 'rs_rank', op: 'gt', right: 70 },
+        { left: 'close', op: 'crosses_above', right: 'resistance' },
+      ],
+      exit: [{ left: 'close', op: 'crosses_below', right: 'sma_50' }],
+      stop_loss_pct: null,
+      take_profit_pct: null,
+      max_holding_days: null,
+      atr_stop_mult: 2.5,
+      atr_trail: true,
+    },
+  },
+  {
+    name: 'CANSLIM-lite (growth × momentum)',
+    description: 'William O\'Neil\'s CANSLIM spirit with the data we store: real earnings '
+      + 'growth (> 20%) and revenue growth (> 10%) — the C and A — married to market '
+      + 'leadership (rs_rank > 80) and a new-highs breakout. Note: growth filters use '
+      + 'today\'s fundamentals (quality screen, not point-in-time).',
+    definition: {
+      entry: [
+        { left: 'earnings_growth_pct', op: 'gt', right: 20 },
+        { left: 'revenue_growth_pct', op: 'gt', right: 10 },
+        { left: 'rs_rank', op: 'gt', right: 80 },
+        { left: 'close', op: 'crosses_above', right: 'resistance' },
+      ],
+      exit: [{ left: 'close', op: 'crosses_below', right: 'sma_50' }],
+      stop_loss_pct: null,
+      take_profit_pct: null,
+      max_holding_days: null,
+      atr_stop_mult: 3,
+      atr_trail: true,
     },
   },
   {

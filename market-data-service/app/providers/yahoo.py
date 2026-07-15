@@ -46,6 +46,28 @@ class YahooProvider(MarketDataProvider, FundamentalDataProvider):
             df["adj_close"] = df["close"]
         return df[OHLCV_COLUMNS]
 
+    # --------------------------------------------------------------- intraday
+    def fetch_intraday(self, vendor_symbol: str, interval: str = "15m",
+                       period: str = "60d") -> pd.DataFrame:
+        """Recent intraday bars (Yahoo free tier: 15m ≈ 60 days, 1m ≈ 7 days).
+        Columns: ts (tz-aware), open, high, low, close, volume."""
+        raw = self._with_retries(
+            lambda: yf.Ticker(vendor_symbol).history(
+                period=period, interval=interval, auto_adjust=False),
+            what=f"intraday {vendor_symbol} {interval}/{period}",
+        )
+        time.sleep(self._throttle)
+        if raw is None or raw.empty:
+            return pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
+        df = raw.reset_index()
+        ts_col = "Datetime" if "Datetime" in df.columns else df.columns[0]
+        df["ts"] = pd.to_datetime(df[ts_col], utc=True)
+        df = df.rename(columns={"Open": "open", "High": "high", "Low": "low",
+                                "Close": "close", "Volume": "volume"})
+        df = df.dropna(subset=["open", "high", "low", "close"])
+        df["volume"] = df["volume"].fillna(0).astype("int64")
+        return df[["ts", "open", "high", "low", "close", "volume"]]
+
     # ------------------------------------------------------------------ quote
     def get_quote(self, vendor_symbol: str) -> Quote:
         def _fetch() -> Quote:

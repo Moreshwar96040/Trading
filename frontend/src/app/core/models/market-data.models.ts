@@ -142,7 +142,7 @@ export interface BacktestRunParams {
   initial_capital?: number;
   max_positions?: number;
   commission_pct?: number;
-  timeframe?: 'daily' | 'weekly' | 'monthly';
+  timeframe?: '15m' | 'daily' | 'weekly' | 'monthly';
 }
 
 export interface BacktestMetrics {
@@ -199,6 +199,36 @@ export interface RegimeInfo {
   note?: string;
 }
 
+export interface MomentumStock {
+  ticker: string;
+  name: string;
+  sector: string | null;
+  close: number;
+  rs_rank: number;
+  return_1m_pct: number | null;
+  return_3m_pct: number | null;
+  pct_from_52w_high: number | null;
+  volume_ratio: number | null;
+}
+
+export interface MomentumBoard {
+  status: 'OK' | 'NO_DATA';
+  note?: string;
+  as_of?: string;
+  universe?: number;
+  sectors?: { sector: string; avg_rs: number; avg_1m_pct: number | null; stocks: number }[];
+  leaders?: MomentumStock[];
+  top?: MomentumStock[];
+  laggards?: MomentumStock[];
+}
+
+export interface SymbolLookupResult {
+  ticker: string;
+  name: string;
+  sector: string | null;
+  in_db: boolean;
+}
+
 export interface QualityScore {
   score: number;
   grade: 'A' | 'B' | 'C' | 'D';
@@ -212,6 +242,7 @@ export interface AlphaSetup {
   sector: string | null;
   close: number | null;
   strategies: { id: number; name: string }[];
+  has_live_signal?: boolean;
   conviction: number;
   risk_multiplier: number;
   news_veto: boolean;
@@ -222,7 +253,7 @@ export interface AlphaSetup {
 }
 
 export interface AlphaStack {
-  status: 'OK' | 'NO_SIGNALS';
+  status: 'OK' | 'NO_SIGNALS' | 'UNKNOWN_SYMBOL';
   regime: { code: string | null; label: string | null };
   setups: AlphaSetup[];
   note: string | null;

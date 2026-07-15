@@ -44,6 +44,23 @@ class OhlcvDaily(Base):
     volume: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
 
+class OhlcvIntraday(Base):
+    __tablename__ = "ohlcv_intraday"
+    __table_args__ = (UniqueConstraint("symbol_id", "interval", "ts",
+                                       name="uq_intraday_bar"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    symbol_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("symbols.id", ondelete="CASCADE"),
+                                           nullable=False)
+    interval: Mapped[str] = mapped_column(String(5), nullable=False, default="15m")
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    open: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    high: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    low: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    close: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    volume: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
 class ScreenerSnapshot(Base):
     __tablename__ = "screener_snapshot"
 

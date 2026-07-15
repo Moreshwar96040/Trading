@@ -7,10 +7,11 @@ import {
   AiPredictionRow, AiRiskPlan, AiUsageSummary, AlertInfo, AlphaStack, BacktestDetail,
   BacktestRunParams, CandleSeries,
   FundamentalsData, GuardianReport, IndicatorSeries, InsightResponse, JournalEntry,
-  LeaksReport, MorningBriefing, NewsResponse, PaperAccount, PaperOrder, RegimeInfo,
+  LeaksReport, MomentumBoard, MorningBriefing, NewsResponse, PaperAccount, PaperOrder,
+  RegimeInfo,
   PositionSizeResult, Quote, RiskReport, RiskSettings, ScreenRequest, ScreenRow,
   ScreenerFieldsMeta, SignalInfo, StrategyDefinition, StrategyInfo, StrategyScore,
-  SymbolInfo, TradeIdeasResponse,
+  SymbolInfo, SymbolLookupResult, TradeIdeasResponse,
 } from '../models/market-data.models';
 
 /** Single gateway to the backend API — components never build URLs themselves. */
@@ -57,6 +58,10 @@ export class MarketDataService {
   /** @param from optional ISO date — backfill history at least back to this date. */
   triggerDailySync(tickers: string[] = [], from?: string): Observable<unknown> {
     return this.http.post(`${this.base}/sync/daily`, from ? { tickers, from } : { tickers });
+  }
+
+  triggerIntradaySync(tickers: string[] = [], interval = '15m'): Observable<unknown> {
+    return this.http.post(`${this.base}/sync/intraday`, { tickers, interval });
   }
 
   triggerCsvImport(): Observable<unknown> {
@@ -243,6 +248,15 @@ export class MarketDataService {
 
   getAiUsage(): Observable<AiUsageSummary> {
     return this.http.get<AiUsageSummary>(`${this.base}/ai/usage`);
+  }
+
+  getMomentumBoard(): Observable<MomentumBoard> {
+    return this.http.get<MomentumBoard>(`${this.base}/momentum/board`);
+  }
+
+  lookupSymbols(query: string): Observable<{ results: SymbolLookupResult[] }> {
+    return this.http.get<{ results: SymbolLookupResult[] }>(
+      `${this.base}/symbols/lookup`, { params: new HttpParams().set('q', query) });
   }
 
   getAlphaStack(ticker?: string): Observable<AlphaStack> {

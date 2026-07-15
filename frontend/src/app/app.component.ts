@@ -30,6 +30,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: '2 · Discover',
     items: [
       { path: '/screener', icon: 'filter_alt', title: 'Screener' },
+      { path: '/momentum', icon: 'speed', title: 'Momentum' },
       { path: '/ai', icon: 'auto_awesome', title: 'AI Ideas' },
       { path: '/chart', icon: 'candlestick_chart', title: 'Charts' },
       { path: '/fundamentals', icon: 'account_balance', title: 'Fundamentals' },

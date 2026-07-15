@@ -62,5 +62,11 @@ export const routes: Routes = [
       import('./features/alpha/alpha-stack-page.component')
         .then((m) => m.AlphaStackPageComponent),
   },
+  {
+    path: 'momentum',
+    loadComponent: () =>
+      import('./features/momentum/momentum-page.component')
+        .then((m) => m.MomentumPageComponent),
+  },
   { path: '**', redirectTo: 'dashboard' },
 ];

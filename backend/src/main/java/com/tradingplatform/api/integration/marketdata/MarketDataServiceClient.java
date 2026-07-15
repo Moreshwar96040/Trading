@@ -141,6 +141,42 @@ public class MarketDataServiceClient {
     }
 
     @SuppressWarnings("unchecked")
+    public Map<String, Object> syncIntraday(List<String> tickers, String interval) {
+        try {
+            var body = new java.util.HashMap<String, Object>();
+            body.put("tickers", tickers == null ? List.of() : tickers);
+            if (interval != null && !interval.isBlank()) body.put("interval", interval);
+            return http.post().uri("/internal/sync/intraday")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Intraday sync unavailable", ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getMomentumBoard() {
+        try {
+            return http.get().uri("/internal/momentum/board").retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Momentum service unavailable", ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> lookupSymbols(String query) {
+        try {
+            return http.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/symbols/lookup")
+                            .queryParam("q", query).build())
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Symbol lookup unavailable", ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
     public Map<String, Object> getAlphaStack(String ticker) {
         try {
             return http.get()

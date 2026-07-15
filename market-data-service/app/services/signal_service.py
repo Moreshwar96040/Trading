@@ -44,6 +44,22 @@ def evaluate_signals(session: Session, strategy_ids: list[int] | None = None,
         if len(df) >= MIN_BARS:
             frames[sym] = df.set_index("trade_date")
 
+    # rs_rank rules need the cross-sectional momentum percentile — inject it as a
+    # column (point-in-time, same construction the backtester uses).
+    from app.backtest.rules import cross_sectional_fields_used
+    uses_rs = any(cross_sectional_fields_used((s.definition or {}).get("entry"))
+                  | cross_sectional_fields_used((s.definition or {}).get("exit"))
+                  for s in strategies if isinstance(s.definition, dict))
+    if uses_rs and frames:
+        import pandas as pd
+
+        from app.services.momentum_service import rs_rank_panel
+        closes = pd.DataFrame({sym.ticker: df["close"].astype(float)
+                               for sym, df in frames.items()})
+        ranks = rs_rank_panel(closes)
+        frames = {sym: df.assign(rs_rank=ranks[sym.ticker].reindex(df.index))
+                  for sym, df in frames.items()}
+
     signals, skipped = [], []
     for strategy in strategies:
         if validate_definition(strategy.definition):

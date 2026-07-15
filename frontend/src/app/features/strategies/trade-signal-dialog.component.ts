@@ -79,6 +79,11 @@ export interface TradeDialogResult {
       }
 
       <div class="actions">
+        @if (!loading() && !sizeError() && !reasonValid()) {
+          <span class="unlock-hint">
+            <mat-icon>lock</mat-icon> write your reason above to unlock the buy
+          </span>
+        }
         <button mat-button (click)="ref.close()">Walk away</button>
         <button mat-flat-button color="primary" [disabled]="!canPlace() || placing()"
                 (click)="place()">
@@ -133,7 +138,15 @@ export interface TradeDialogResult {
     .reason-field .ok { color: var(--up); }
     .size-error { display: flex; gap: 8px; align-items: center; color: var(--down);
                   font-size: 13px; }
-    .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+    .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px;
+               align-items: center; }
+    .unlock-hint {
+      display: flex; align-items: center; gap: 5px; margin-right: auto;
+      font-size: 12px; color: #ffb74d;
+      animation: hintPulse 2.2s ease-in-out infinite;
+    }
+    .unlock-hint mat-icon { font-size: 15px; width: 15px; height: 15px; }
+    @keyframes hintPulse { 0%, 100% { opacity: 0.65; } 50% { opacity: 1; } }
     .actions button mat-spinner { display: inline-block; }
 
     .conviction {
@@ -287,7 +300,7 @@ export class TradeSignalDialogComponent implements OnInit {
     const sig = this.data.signal;
     this.placing.set(true);
     this.api.placePaperOrder(sig.ticker, 'BUY', this.effectiveQty(), {
-      strategyId: sig.strategyId,
+      strategyId: sig.strategyId || null,   // 0 = posture-based analysis, no strategy FK
       stopPrice: r.stop_price,
       targetPrice: r.take_profit_price,
     }).subscribe({

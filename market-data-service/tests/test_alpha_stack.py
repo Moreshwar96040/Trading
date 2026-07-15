@@ -119,3 +119,44 @@ def test_ticker_filter(session: Session):
     _seed_signal(session, "BBB")
     stack = alpha_stack(session, ticker="aaa")
     assert [s["ticker"] for s in stack["setups"]] == ["AAA"]
+
+
+# ---------- analyze mode: any stock, signal or not ----------
+
+def test_analyze_without_signal_uses_posture(session: Session):
+    sym = Symbol(ticker="NOSIG", yahoo_symbol="NOSIG.NS", name="NoSig Ltd", sector="FMCG")
+    session.add(sym)
+    session.flush()
+    session.add(ScreenerSnapshot(symbol_id=sym.id, as_of_date=date(2026, 7, 10),
+                                 close=500, sma_50=480, sma_200=450, rsi_14=58,
+                                 atr_14=10, pct_from_52w_high=-3.0))
+    session.commit()
+    stack = alpha_stack(session, ticker="NOSIG")
+    assert stack["status"] == "OK"
+    setup = stack["setups"][0]
+    assert setup["has_live_signal"] is False
+    assert setup["strategies"] == []
+    tech = next(b for b in setup["breakdown"] if b["layer"] == "technical")
+    assert "posture" in tech["note"].lower()
+    assert 0 < tech["points"] <= 30          # capped below a real signal's 40
+    assert setup["close"] == 500.0
+
+
+def test_analyze_posture_never_outranks_real_signal(session: Session):
+    _seed_signal(session, "SIG")            # real fired signal
+    sym = Symbol(ticker="POSTURE", yahoo_symbol="POSTURE.NS", name="P Ltd", sector="IT")
+    session.add(sym)
+    session.flush()
+    session.add(ScreenerSnapshot(symbol_id=sym.id, as_of_date=date(2026, 7, 10),
+                                 close=500, sma_50=480, sma_200=450, rsi_14=60,
+                                 atr_14=10, pct_from_52w_high=-2.0))
+    session.commit()
+    sig_conv = alpha_stack(session, ticker="SIG")["setups"][0]["conviction"]
+    posture_conv = alpha_stack(session, ticker="POSTURE")["setups"][0]["conviction"]
+    assert sig_conv > posture_conv
+
+
+def test_analyze_unknown_symbol(session: Session):
+    stack = alpha_stack(session, ticker="NOPE")
+    assert stack["status"] == "UNKNOWN_SYMBOL"
+    assert "NOPE" in stack["note"]

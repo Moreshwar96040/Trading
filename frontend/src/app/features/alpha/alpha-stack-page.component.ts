@@ -1,15 +1,21 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnInit, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
+import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 
-import { AlphaSetup, AlphaStack, SignalInfo } from '../../core/models/market-data.models';
+import {
+  AlphaSetup, AlphaStack, SignalInfo, SymbolLookupResult,
+} from '../../core/models/market-data.models';
 import { MarketDataService } from '../../core/services/market-data.service';
 import { TradeSignalDialogComponent } from '../strategies/trade-signal-dialog.component';
 
@@ -21,14 +27,55 @@ import { TradeSignalDialogComponent } from '../strategies/trade-signal-dialog.co
 @Component({
   selector: 'app-alpha-stack-page',
   standalone: true,
-  imports: [CommonModule, RouterLink, MatCardModule, MatButtonModule, MatIconModule,
+  imports: [CommonModule, FormsModule, RouterLink, MatAutocompleteModule, MatCardModule,
+            MatButtonModule, MatIconModule, MatFormFieldModule, MatInputModule,
             MatDialogModule, MatProgressSpinnerModule, MatSnackBarModule, MatTooltipModule],
   template: `
     <h2>Alpha Stack</h2>
     <p class="lede">Technical says <em>when</em> · fundamentals say <em>what's worth it</em> ·
       news says <em>not today?</em> · regime says <em>how much</em>. Conviction decides size.</p>
 
-    @if (loading()) {
+    <!-- analyze any stock, signal or not -->
+    <div class="search-row">
+      <mat-form-field appearance="outline" class="search-field">
+        <mat-label>Analyze any stock</mat-label>
+        <input matInput [(ngModel)]="query" (ngModelChange)="onQueryChange($event)"
+               (keydown.enter)="analyze()" [matAutocomplete]="auto"
+               placeholder="e.g. TCS, RELIANCE, INFY" autocomplete="off" />
+        <mat-icon matSuffix>query_stats</mat-icon>
+        <mat-autocomplete #auto="matAutocomplete" (optionSelected)="analyze()">
+          @for (s of suggestions(); track s.ticker) {
+            <mat-option [value]="s.ticker">
+              <span class="sugg-ticker">{{ s.ticker }}</span>
+              <span class="sugg-name">{{ s.name }}@if (s.sector) { · {{ s.sector }} }</span>
+              <span class="sugg-badge" [class.new]="!s.in_db">
+                {{ s.in_db ? 'tracked' : 'Yahoo · will be added' }}
+              </span>
+            </mat-option>
+          }
+        </mat-autocomplete>
+      </mat-form-field>
+      <button mat-flat-button color="primary" (click)="analyze()"
+              [disabled]="loading() || seeding() || !query.trim()">
+        <mat-icon>bolt</mat-icon> Analyze
+      </button>
+      @if (analyzed()) {
+        <button mat-stroked-button (click)="showAll()">
+          <mat-icon>layers</mat-icon> Back to live setups
+        </button>
+      }
+    </div>
+
+    @if (seeding()) {
+      <mat-card appearance="outlined" class="empty seeding">
+        <mat-spinner diameter="28" />
+        <div>
+          <p><strong>{{ query.toUpperCase() }}</strong> isn't in your database yet —
+            adding it from Yahoo Finance and downloading its history…</p>
+          <p class="dim">First time takes ~10-20 seconds (price history + snapshot).</p>
+        </div>
+      </mat-card>
+    } @else if (loading()) {
       <div class="spinner"><mat-spinner diameter="36" /></div>
     } @else if (stack()) {
       @if (stack(); as st) {
@@ -71,7 +118,10 @@ import { TradeSignalDialogComponent } from '../strategies/trade-signal-dialog.co
                       grade {{ s.quality.grade }}</span>
                   }
                 </div>
-                <p class="strategies">via {{ strategyNames(s) }}</p>
+                <p class="strategies">
+                  @if (s.strategies.length) { via {{ strategyNames(s) }} }
+                  @else { snapshot posture read — no live signal fired }
+                </p>
               </div>
 
               <!-- act -->
@@ -100,6 +150,9 @@ import { TradeSignalDialogComponent } from '../strategies/trade-signal-dialog.co
     }
   `,
   styles: `
+    .search-row { display: flex; gap: 12px; align-items: center; margin-bottom: 6px;
+                  flex-wrap: wrap; }
+    .search-field { min-width: 300px; }
     .lede { color: var(--text-dim); font-size: 13.5px; margin: -6px 0 18px; }
     .lede em { color: var(--accent); font-style: normal; font-weight: 600; }
     .spinner { display: flex; justify-content: center; padding: 40px; }
@@ -154,6 +207,16 @@ import { TradeSignalDialogComponent } from '../strategies/trade-signal-dialog.co
     .empty { display: flex; gap: 16px; align-items: center; padding: 22px;
              color: var(--text-dim); }
     .empty a { margin-top: 8px; }
+    .empty.seeding p { margin: 2px 0; }
+    .empty.seeding .dim { font-size: 12px; opacity: 0.7; }
+    .sugg-ticker { font-weight: 600; margin-right: 8px; }
+    .sugg-name { opacity: 0.6; font-size: 12px; }
+    .sugg-badge {
+      float: right; font-size: 9px; font-weight: 700; letter-spacing: 0.06em;
+      padding: 2px 8px; border-radius: 999px; margin-top: 4px;
+      background: rgba(38, 166, 154, 0.15); color: var(--up);
+    }
+    .sugg-badge.new { background: rgba(129, 140, 248, 0.15); color: var(--accent-2); }
     @keyframes pageIn { from { opacity: 0; transform: translateY(14px); }
                         to { opacity: 1; transform: translateY(0); } }
   `,
@@ -165,15 +228,104 @@ export class AlphaStackPageComponent implements OnInit {
 
   readonly stack = signal<AlphaStack | null>(null);
   readonly loading = signal(true);
+  readonly analyzed = signal(false);
+  readonly seeding = signal(false);
+  readonly suggestions = signal<SymbolLookupResult[]>([]);
+  query = '';
+  private suggestTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private readonly route = inject(ActivatedRoute);
 
   ngOnInit(): void {
-    this.api.getAlphaStack().subscribe({
-      next: (s) => { this.stack.set(s); this.loading.set(false); },
+    // deep-link support: /alpha?ticker=TCS analyzes immediately (Momentum page uses this)
+    const ticker = this.route.snapshot.queryParamMap.get('ticker');
+    if (ticker) {
+      this.query = ticker.toUpperCase();
+      this.analyze();
+    } else {
+      this.showAll();
+    }
+  }
+
+  onQueryChange(q: string): void {
+    if (this.suggestTimer) clearTimeout(this.suggestTimer);
+    const term = q.trim();
+    if (term.length < 1) { this.suggestions.set([]); return; }
+    this.suggestTimer = setTimeout(() => {
+      // global lookup: local DB matches + every NSE stock Yahoo knows
+      this.api.lookupSymbols(term).subscribe({
+        next: (r) => this.suggestions.set(r.results),
+        error: () => this.suggestions.set([]),
+      });
+    }, 250);
+  }
+
+  showAll(): void {
+    this.analyzed.set(false);
+    this.query = '';
+    this.suggestions.set([]);
+    this.load(undefined);
+  }
+
+  analyze(): void {
+    const ticker = this.query.trim().toUpperCase();
+    if (!ticker) return;
+    this.analyzed.set(true);
+    this.load(ticker);
+  }
+
+  private load(ticker: string | undefined): void {
+    this.loading.set(true);
+    this.api.getAlphaStack(ticker).subscribe({
+      next: (s) => {
+        // Not in our DB yet? Seed it from Yahoo (validates + downloads history),
+        // refresh the snapshot so the posture read has data, then analyze again.
+        if (ticker && s.status === 'UNKNOWN_SYMBOL') {
+          this.seedAndRetry(ticker);
+          return;
+        }
+        this.stack.set(s);
+        this.loading.set(false);
+      },
       error: () => {
         this.loading.set(false);
         this.snackBar.open('Alpha Stack unavailable — is the data service running?',
                            'Dismiss', { duration: 5000 });
       },
+    });
+  }
+
+  private seedAndRetry(ticker: string): void {
+    this.loading.set(false);
+    this.seeding.set(true);
+    this.api.seedSymbol(ticker).subscribe({
+      next: (sym) => {
+        // fundamentals give the quality layer real data; snapshot powers the
+        // posture read — then analyze. Failures degrade to neutral scores.
+        this.api.triggerFundamentalsRefresh([ticker]).subscribe({
+          complete: () => this.finishSeed(sym.ticker, sym.name),
+          error: () => this.finishSeed(sym.ticker, sym.name),
+        });
+      },
+      error: (err) => {
+        this.seeding.set(false);
+        this.stack.set({
+          status: 'UNKNOWN_SYMBOL', regime: { code: null, label: null }, setups: [],
+          note: err?.error?.message
+            ?? `${ticker} not found on Yahoo Finance either — check the ticker spelling`,
+        });
+      },
+    });
+  }
+
+  private finishSeed(ticker: string, name: string): void {
+    this.api.triggerSnapshotRefresh().subscribe({
+      complete: () => {
+        this.seeding.set(false);
+        this.snackBar.open(`${ticker} added — ${name}`, undefined, { duration: 4000 });
+        this.load(ticker);
+      },
+      error: () => { this.seeding.set(false); this.load(ticker); },
     });
   }
 
@@ -187,10 +339,11 @@ export class AlphaStackPageComponent implements OnInit {
   }
 
   trade(s: AlphaSetup): void {
-    const first = s.strategies[0];
+    const first = s.strategies[0];    // absent for posture-only analyses
     const signal: SignalInfo = {
-      id: 0, strategyId: first.id, strategyName: first.name, ticker: s.ticker,
-      symbolName: s.name, signal: 'ENTRY', asOfDate: 'latest bar',
+      id: 0, strategyId: first?.id ?? 0,
+      strategyName: first?.name ?? 'Alpha Stack analysis',
+      ticker: s.ticker, symbolName: s.name, signal: 'ENTRY', asOfDate: 'latest bar',
       close: s.close, evaluatedAt: '',
     };
     this.dialog.open(TradeSignalDialogComponent, { data: { signal }, autoFocus: false })
