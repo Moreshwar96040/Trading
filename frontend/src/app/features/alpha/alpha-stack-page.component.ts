@@ -100,7 +100,10 @@ import { StockNewsDialogComponent } from './stock-news-dialog.component';
       @if (st.setups.length) {
         <div class="stack">
           @for (s of st.setups; track s.ticker; let i = $index) {
-            <mat-card appearance="outlined" class="setup" [style.animation-delay.ms]="i * 80">
+            <mat-card appearance="outlined"
+                      [class]="'setup v-' + s.verdict.toLowerCase()"
+                      [style.animation-delay.ms]="i * 80">
+             <div class="setup-row">
               <!-- conviction meter -->
               <div class="meter-zone">
                 <svg viewBox="0 0 80 80" class="meter">
@@ -108,8 +111,8 @@ import { StockNewsDialogComponent } from './stock-news-dialog.component';
                   <circle cx="40" cy="40" r="34"
                           [class]="'meter-fill ' + s.verdict.toLowerCase()"
                           [style.stroke-dasharray]="213.6"
-                          [style.stroke-dashoffset]="213.6 * (1 - s.conviction / 100)" />
-                  <text x="40" y="46" text-anchor="middle" class="meter-num">{{ s.conviction }}</text>
+                          [style.stroke-dashoffset]="213.6 * (1 - conv(s) / 100)" />
+                  <text x="40" y="46" text-anchor="middle" class="meter-num">{{ conv(s) }}</text>
                 </svg>
                 <span class="verdict-tag" [class]="'verdict-tag ' + s.verdict.toLowerCase()">
                   {{ s.verdict === 'VETOED' ? 'NEWS VETO' : s.verdict.replace('_', ' ') }}
@@ -156,6 +159,12 @@ import { StockNewsDialogComponent } from './stock-news-dialog.component';
                   @if (s.strategies.length) { via {{ strategyNames(s) }} }
                   @else { snapshot posture read — no live signal fired }
                 </p>
+                <button type="button" class="why-toggle" (click)="toggleExpand(s.ticker)"
+                        [attr.aria-expanded]="isExpanded(s.ticker)"
+                        [attr.aria-label]="'Toggle conviction breakdown for ' + s.ticker">
+                  <mat-icon>{{ isExpanded(s.ticker) ? 'expand_less' : 'expand_more' }}</mat-icon>
+                  {{ isExpanded(s.ticker) ? 'Hide breakdown' : 'Why ' + conv(s) + '/100?' }}
+                </button>
               </div>
 
               <!-- act -->
@@ -168,6 +177,28 @@ import { StockNewsDialogComponent } from './stock-news-dialog.component';
                   <mat-icon>rocket_launch</mat-icon> Trade
                 </button>
               </div>
+             </div>
+
+              <!-- expandable "why": each layer as a weighted contribution bar -->
+              @if (isExpanded(s.ticker)) {
+                <div class="detail">
+                  @for (b of s.breakdown; track b.layer) {
+                    <div class="bd-row">
+                      <mat-icon class="bd-icon">{{ layerIcon(b.layer) }}</mat-icon>
+                      <span class="bd-label">{{ layerLabel(b.layer) }}</span>
+                      <div class="bd-track">
+                        <div class="bd-fill"
+                             [class.pos]="b.strength >= 0.6" [class.neg]="b.strength <= 0.4"
+                             [style.width.%]="b.max ? (b.points / b.max * 100) : 0"></div>
+                      </div>
+                      <span class="bd-val">{{ b.points }}<span class="of-max">/{{ b.max }}</span></span>
+                    </div>
+                    <p class="bd-note">{{ b.note }}</p>
+                  }
+                  <p class="detail-foot">Conviction is the weighted sum of these layers,
+                    out of 100. Negative news vetoes sizing regardless of the total.</p>
+                </div>
+              }
             </mat-card>
           }
         </div>
@@ -200,9 +231,52 @@ import { StockNewsDialogComponent } from './stock-news-dialog.component';
 
     .stack { display: flex; flex-direction: column; gap: 12px; }
     .setup {
-      display: flex; align-items: center; gap: 20px; padding: 14px 20px;
+      display: flex; flex-direction: column; padding: 14px 20px; position: relative;
       animation: pageIn 0.45s cubic-bezier(0.22, 0.9, 0.3, 1) both;
+      transition: border-color 0.25s ease, box-shadow 0.25s ease;
     }
+    /* verdict accent stripe down the left edge — instant read of the call */
+    .setup::before {
+      content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px;
+      border-radius: 0 3px 3px 0; opacity: 0.85;
+    }
+    .setup.v-high::before { background: var(--up); }
+    .setup.v-normal::before { background: var(--accent); }
+    .setup.v-small::before { background: #ffb74d; }
+    .setup.v-stand_aside::before, .setup.v-vetoed::before { background: var(--down); }
+    .setup-row { display: flex; align-items: center; gap: 20px; }
+
+    /* expandable "why" breakdown */
+    .why-toggle {
+      display: inline-flex; align-items: center; gap: 3px; margin-top: 6px;
+      background: none; border: none; cursor: pointer; color: var(--accent);
+      font: 600 12px Inter, sans-serif; padding: 2px 0;
+    }
+    .why-toggle:hover { filter: brightness(1.15); }
+    .why-toggle mat-icon { font-size: 16px; width: 16px; height: 16px; }
+    .detail {
+      border-top: 1px solid var(--card-border); margin-top: 12px; padding-top: 12px;
+      animation: detailIn 0.28s cubic-bezier(0.22, 0.9, 0.3, 1) both;
+    }
+    @keyframes detailIn { from { opacity: 0; transform: translateY(-6px); }
+                          to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .detail { animation: none; } }
+    .bd-row { display: flex; align-items: center; gap: 10px; margin-top: 9px; }
+    .bd-icon { font-size: 16px; width: 16px; height: 16px; color: var(--text-dim);
+               flex-shrink: 0; }
+    .bd-label { width: 150px; font-size: 12.5px; color: var(--text-dim); flex-shrink: 0; }
+    .bd-track { flex: 1; height: 8px; border-radius: 999px;
+                background: rgba(148, 163, 184, 0.14); overflow: hidden; }
+    .bd-fill { height: 100%; border-radius: 999px; background: var(--accent);
+               transition: width 0.55s cubic-bezier(0.22, 0.9, 0.3, 1); }
+    .bd-fill.pos { background: linear-gradient(90deg, var(--accent), var(--up)); }
+    .bd-fill.neg { background: var(--down); }
+    .bd-val { width: 54px; text-align: right; font: 700 12px 'JetBrains Mono', monospace;
+              font-variant-numeric: tabular-nums; }
+    .bd-note { margin: 2px 0 2px 26px; font-size: 11.5px; color: var(--text-dim);
+               line-height: 1.4; }
+    .detail-foot { margin-top: 12px; font-size: 11px; color: var(--text-dim); opacity: 0.75; }
+
     .meter-zone { display: flex; flex-direction: column; align-items: center; gap: 4px;
                   flex-shrink: 0; }
     .meter { width: 76px; height: 76px; transform: rotate(-90deg); }
@@ -278,6 +352,10 @@ export class AlphaStackPageComponent implements OnInit {
   readonly seeding = signal(false);
   readonly refreshingNews = signal(false);
   readonly suggestions = signal<SymbolLookupResult[]>([]);
+  /** Ticker → conviction currently displayed, tweened up from 0 on load. */
+  readonly animatedConv = signal<Record<string, number>>({});
+  /** Tickers whose breakdown panel is expanded. */
+  readonly expanded = signal<Set<string>>(new Set());
   query = '';
   private suggestTimer: ReturnType<typeof setTimeout> | null = null;
   /** Whatever view we're on, so a news refresh reloads the same thing. */
@@ -373,6 +451,8 @@ export class AlphaStackPageComponent implements OnInit {
         }
         this.stack.set(s);
         this.loading.set(false);
+        this.expanded.set(new Set());            // collapse panels on new data
+        this.animateConvictions(s.setups ?? []); // count the rings up from 0
       },
       error: () => {
         this.loading.set(false);
@@ -429,6 +509,52 @@ export class AlphaStackPageComponent implements OnInit {
     return { technical: 'candlestick_chart', quality: 'account_balance',
              news: 'newspaper', momentum: 'speed', macro: 'public',
              ml: 'psychology', regime: 'radar' }[layer] ?? 'circle';
+  }
+
+  private readonly LAYER_LABELS: Record<string, string> = {
+    technical: 'Technical (timing)', quality: 'Fundamentals (quality)',
+    news: 'News sentiment', momentum: 'Relative strength',
+    ml: 'ML vote', macro: 'Market-wide news', regime: 'Market regime',
+  };
+
+  layerLabel(layer: string): string {
+    return this.LAYER_LABELS[layer] ?? layer;
+  }
+
+  /** Conviction currently on screen for a card — the tweened value while the
+   *  count-up runs, the real value once settled. */
+  conv(s: AlphaSetup): number {
+    return this.animatedConv()[s.ticker] ?? s.conviction;
+  }
+
+  isExpanded(ticker: string): boolean {
+    return this.expanded().has(ticker);
+  }
+
+  toggleExpand(ticker: string): void {
+    const next = new Set(this.expanded());
+    next.has(ticker) ? next.delete(ticker) : next.add(ticker);
+    this.expanded.set(next);
+  }
+
+  /** Count every ring up from 0 on load — one rAF loop, eased, honoring
+   *  reduced-motion (which snaps straight to the final value). */
+  private animateConvictions(setups: AlphaSetup[]): void {
+    const final = Object.fromEntries(setups.map((s) => [s.ticker, s.conviction]));
+    const reduce = typeof matchMedia === 'function'
+      && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce || !setups.length) { this.animatedConv.set(final); return; }
+
+    const start = performance.now();
+    const duration = 850;
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);              // easeOutCubic
+      this.animatedConv.set(Object.fromEntries(
+        setups.map((s) => [s.ticker, Math.round(s.conviction * eased)])));
+      if (t < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
   }
 
   strategyNames(s: AlphaSetup): string {
