@@ -26,6 +26,14 @@ app:
     max-range-days: ${CANDLES_MAX_RANGE_DAYS:3700}
   paper:
     commission-pct: ${PAPER_COMMISSION_PCT:0.05}
+  tradingview:
+    webhook-secret: ${TRADINGVIEW_WEBHOOK_SECRET:}
+  # optional gate for the whole API — set when tunneling the backend (ngrok etc.)
+  api-key: ${API_KEY:}
+  upstox:
+    client-id: ${UPSTOX_CLIENT_ID:}
+    client-secret: ${UPSTOX_CLIENT_SECRET:}
+    redirect-uri: ${UPSTOX_REDIRECT_URI:http://localhost:8080/api/v1/upstox/callback}
 
 logging:
   level:

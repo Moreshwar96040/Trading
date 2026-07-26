@@ -9,7 +9,7 @@
               <option name="provider" value="claude" />
               <option name="sessionId" value="b2a242b1-cb64-4cfb-b242-49135a7bd1e1" />
               <option name="cwd" value="I:\Official\1.Exploring\Workpace\Trade\Trading" />
-              <option name="model" value="claude-sonnet-4-6[1m]" />
+              <option name="model" value="claude-opus-4-8[1m]" />
               <option name="permissionMode" value="plan" />
             </TabSessionState>
           </value>

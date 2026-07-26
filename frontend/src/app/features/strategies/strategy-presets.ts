@@ -14,6 +14,50 @@ export interface StrategyPreset {
  */
 export const STRATEGY_PRESETS: StrategyPreset[] = [
   {
+    name: 'Fortress Breakout (S/R × quality × volume)',
+    description: 'Major resistance only breaks for real when real money pushes through it. '
+      + 'Entry: a financially sound company (ROE > 12%, debt/equity < 1.5) closes above '
+      + 'its confirmed swing resistance on above-average volume (> 1× the 20-day volume '
+      + 'average — the conviction filter that separates breakouts from head-fakes). '
+      + 'Broken resistance becomes support: exit only if price falls back through swing '
+      + 'support, with a 2.5× ATR trailing stop as the safety net.',
+    definition: {
+      entry: [
+        { left: 'roe_pct', op: 'gt', right: 12 },                    // sound business
+        { left: 'debt_to_equity', op: 'lt', right: 1.5 },            // survivable balance sheet
+        { left: 'close', op: 'crosses_above', right: 'resistance' }, // major level breaks
+        { left: 'volume', op: 'gt', right: 'vol_sma_20' },           // with real participation
+      ],
+      exit: [{ left: 'close', op: 'crosses_below', right: 'support' }],
+      stop_loss_pct: null,
+      take_profit_pct: null,
+      max_holding_days: null,
+      atr_stop_mult: 2.5,
+      atr_trail: true,
+    },
+  },
+  {
+    name: 'Fortress Range (buy support, sell resistance)',
+    description: 'The classic S/R range trade, quality-filtered: when a sound company '
+      + '(ROE > 12%) reclaims its swing support on above-average volume — buyers '
+      + 'defending the level with size — buy the bounce. Sell when price reaches swing '
+      + 'resistance (the other wall of the range). A 2× ATR stop guards against the '
+      + 'reclaim failing, and 45 bars time-boxes dead ranges.',
+    definition: {
+      entry: [
+        { left: 'roe_pct', op: 'gt', right: 12 },
+        { left: 'close', op: 'crosses_above', right: 'support' },    // the level held
+        { left: 'volume', op: 'gt', right: 'vol_sma_20' },           // defended with size
+      ],
+      exit: [{ left: 'close', op: 'gte', right: 'resistance' }],     // sell into the wall
+      stop_loss_pct: null,
+      take_profit_pct: null,
+      max_holding_days: 45,
+      atr_stop_mult: 2,
+      atr_trail: false,
+    },
+  },
+  {
     name: 'Momentum Leader (RS + trend + breakout)',
     description: 'The Momentum Engine as a strategy: only top-quartile relative-strength '
       + 'stocks (rs_rank > 75), in a confirmed uptrend (close > SMA-200, SMA-50 > SMA-200), '

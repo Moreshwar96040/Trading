@@ -166,20 +166,90 @@ def news(ticker: str, refresh: bool = False,
     from app.services.news_service import fetch_and_store_news, latest_news
 
     sym = _get_symbol(session, ticker)
-    fetched = fetch_and_store_news(session, sym, settings.news_max_articles) if refresh else 0
+    fetch_errors: list = []
+    fetched = (fetch_and_store_news(session, sym, settings.news_max_articles,
+                                    errors=fetch_errors) if refresh else 0)
     articles = latest_news(session, sym.id)
     if not articles and not refresh:      # first visit: fetch instead of showing nothing
-        fetched = fetch_and_store_news(session, sym, settings.news_max_articles)
+        fetched = fetch_and_store_news(session, sym, settings.news_max_articles,
+                                       errors=fetch_errors)
         articles = latest_news(session, sym.id)
+
+    insight = news_insight(session, settings, sym, articles)
+
+    # Viewing a stock's news here also feeds the Alpha Stack: record today's
+    # sentiment so the conviction engine's news layer and trend see the same
+    # read the user just saw, instead of the two views disagreeing.
+    content = insight.get("insight") if isinstance(insight, dict) else None
+    if isinstance(content, dict) and content.get("sentiment"):
+        from datetime import date as _date
+
+        from app.services.news_sentiment_service import record_daily_sentiment
+        try:
+            record_daily_sentiment(session, sym.id, _date.today(),
+                                   content.get("sentiment"),
+                                   content.get("catalysts") or [], len(articles))
+        except Exception:                 # noqa: BLE001 — history is a bonus, not the response
+            log.warning("Could not record sentiment history for %s", sym.ticker,
+                        exc_info=True)
+            session.rollback()
 
     return {
         "ticker": sym.ticker,
         "fetched_new": fetched,
+        "fetch_error": fetch_errors[0] if fetch_errors else None,
         "llm_enabled": llm_enabled(settings),
         "articles": [{"title": a.title, "publisher": a.publisher, "link": a.link,
                       "published_at": a.published_at.isoformat() if a.published_at else None}
                      for a in articles],
-        "insight": news_insight(session, settings, sym, articles),
+        "insight": insight,
+    }
+
+
+@router.get("/internal/news/market")
+def market_news(refresh: bool = False,
+                session: Session = Depends(get_session),
+                settings: Settings = Depends(get_settings)) -> dict:
+    """Market-wide headlines (multi-source RSS) + cached AI macro digest."""
+    from app.ai.narrator import llm_enabled
+    from app.services.market_news_service import (latest_market_news, macro_digest,
+                                                  refresh_market_news)
+    result = refresh_market_news(session, settings) if refresh else None
+    headlines = latest_market_news(session)
+    if not headlines and not refresh:      # first visit: fetch instead of showing nothing
+        result = refresh_market_news(session, settings)
+        headlines = latest_market_news(session)
+    return {
+        "refresh": result,
+        "llm_enabled": llm_enabled(settings),
+        "headlines": [{"source": h.source, "title": h.title, "link": h.link,
+                       "published_at": h.published_at.isoformat()
+                       if h.published_at else None}
+                      for h in headlines],
+        "digest": macro_digest(session, settings),
+    }
+
+
+@router.post("/internal/news/refresh-all")
+def refresh_all_news(session: Session = Depends(get_session),
+                     settings: Settings = Depends(get_settings)) -> dict:
+    """One-click news refresh — the same work the pre-market scheduler does:
+    re-pull every market feed, regenerate the macro digest, then refresh
+    per-stock news for signaled/held symbols. Drives the Alpha Stack's
+    "Refresh news" button so a stale macro layer is fixable from where it shows."""
+    from app.services.market_news_service import macro_digest, refresh_market_news
+    from app.services.news_sentiment_service import refresh_signal_news
+
+    market = refresh_market_news(session, settings)
+    digest = macro_digest(session, settings) or {}
+    insight = digest.get("insight") if isinstance(digest, dict) else None
+    signal_news = refresh_signal_news(session, settings)
+    return {
+        "market": market,
+        "macro_sentiment": (insight.get("sentiment")
+                            if isinstance(insight, dict) else None),
+        "macro_error": digest.get("error") if isinstance(digest, dict) else None,
+        "signal_news": signal_news,
     }
 
 
@@ -271,6 +341,50 @@ def symbols_lookup(q: str, session: Session = Depends(get_session)) -> dict:
     return {"results": results[:12]}
 
 
+@router.get("/internal/data/health")
+def data_health(session: Session = Depends(get_session)) -> dict:
+    """One glance: how fresh is every data source the scores depend on?"""
+    from sqlalchemy import text as sqltext
+
+    def scalar(q: str):
+        try:
+            return session.execute(sqltext(q)).scalar()
+        except Exception:                          # noqa: BLE001 — table may not exist yet
+            session.rollback()
+            return None
+
+    return {
+        "symbols_active": scalar("SELECT COUNT(*) FROM symbols WHERE active") or 0,
+        "daily": {
+            "last_bar": str(scalar("SELECT MAX(trade_date) FROM ohlcv_daily") or ""),
+            "first_bar": str(scalar("SELECT MIN(trade_date) FROM ohlcv_daily") or ""),
+            "rows": scalar("SELECT COUNT(*) FROM ohlcv_daily") or 0,
+        },
+        "snapshot": {"as_of": str(scalar("SELECT MAX(as_of_date) FROM screener_snapshot") or "")},
+        "fundamentals": {
+            "symbols": scalar("SELECT COUNT(*) FROM fundamentals") or 0,
+            "oldest": str(scalar("SELECT MIN(computed_at) FROM fundamentals") or ""),
+        },
+        "intraday": {
+            "last_bar": str(scalar("SELECT MAX(ts) FROM ohlcv_intraday") or ""),
+            "rows": scalar("SELECT COUNT(*) FROM ohlcv_intraday") or 0,
+        },
+        "signals": {"as_of": str(scalar("SELECT MAX(as_of_date) FROM strategy_signals") or "")},
+        "last_sync": {
+            "status": scalar("SELECT status FROM sync_audit ORDER BY id DESC LIMIT 1"),
+            "finished_at": str(scalar(
+                "SELECT finished_at FROM sync_audit ORDER BY id DESC LIMIT 1") or ""),
+        },
+    }
+
+
+@router.get("/internal/edge/gates")
+def edge_gates_endpoint(session: Session = Depends(get_session)) -> dict:
+    """Per-strategy validation pipeline: sample -> robustness -> paper -> live edge."""
+    from app.services.edge_gates import edge_gates
+    return edge_gates(session)
+
+
 @router.get("/internal/momentum/board")
 def momentum_board_endpoint(session: Session = Depends(get_session)) -> dict:
     """Momentum Engine: sector rotation heat + relative-strength leaders."""
@@ -280,10 +394,12 @@ def momentum_board_endpoint(session: Session = Depends(get_session)) -> dict:
 
 @router.get("/internal/alpha/stack")
 def alpha_stack_endpoint(ticker: str | None = None,
-                         session: Session = Depends(get_session)) -> dict:
-    """Alpha Stack: conviction-ranked live setups (technical+quality+news+regime+ML)."""
+                         session: Session = Depends(get_session),
+                         settings: Settings = Depends(get_settings)) -> dict:
+    """Alpha Stack: conviction-ranked live setups (technical+quality+news+regime+ML).
+    Single-ticker analyses self-warm their news inputs before scoring."""
     from app.services.conviction_service import alpha_stack
-    return alpha_stack(session, ticker=ticker)
+    return alpha_stack(session, ticker=ticker, settings=settings)
 
 
 @router.get("/internal/portfolio/health")
@@ -291,6 +407,16 @@ def portfolio_health(session: Session = Depends(get_session)) -> dict:
     """Position Guardian: proactive health checks + action queue for open positions."""
     from app.services.guardian_service import position_health
     return position_health(session)
+
+
+@router.post("/internal/portfolio/health")
+def portfolio_health_with_live(body: dict | None = None,
+                               session: Session = Depends(get_session)) -> dict:
+    """Guardian over paper positions PLUS live broker holdings passed in the body:
+    {"live_positions": [{"ticker","quantity","avg_cost","last_price"?,"stop_price"?}]}"""
+    from app.services.guardian_service import position_health
+    body = body or {}
+    return position_health(session, live_positions=body.get("live_positions"))
 
 
 @router.get("/internal/briefing")

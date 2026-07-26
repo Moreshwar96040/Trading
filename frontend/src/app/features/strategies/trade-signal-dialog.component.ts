@@ -283,7 +283,8 @@ export class TradeSignalDialogComponent implements OnInit {
   convictionTooltip(): string {
     const s = this.setup();
     if (!s) return '';
-    return s.breakdown.map((b) => `${b.points >= 0 ? '+' : ''}${b.points} ${b.note}`).join('\n');
+    // Layers contribute points out of their weight; the weights sum to 100.
+    return s.breakdown.map((b) => `${b.points}/${b.max} ${b.note}`).join('\n');
   }
 
   reasonValid(): boolean {

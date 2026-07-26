@@ -15,7 +15,6 @@ type Result = PageResult | SymbolResult;
 const PAGES: PageResult[] = [
   { kind: 'page', icon: 'radar', title: 'Trade Desk', hint: 'regime · signals · account', path: '/dashboard' },
   { kind: 'page', icon: 'filter_alt', title: 'Screener', hint: 'scan the market', path: '/screener' },
-  { kind: 'page', icon: 'auto_awesome', title: 'AI Ideas', hint: 'ranked confluence trades', path: '/ai' },
   { kind: 'page', icon: 'speed', title: 'Momentum', hint: 'sector rotation + RS leaders', path: '/momentum' },
   { kind: 'page', icon: 'candlestick_chart', title: 'Charts', hint: 'price + indicators', path: '/chart' },
   { kind: 'page', icon: 'account_balance', title: 'Fundamentals', hint: 'ratios · statements · news', path: '/fundamentals' },

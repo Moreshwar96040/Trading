@@ -29,7 +29,11 @@ NEWS_SYSTEM = (
     "keys: summary (2-3 plain sentences a retail investor understands), sentiment (one of "
     "positive/negative/neutral/mixed), key_points (array of max 4 short strings), "
     "watch_for (array of max 2 short strings: upcoming catalysts or risks implied by the "
-    "news). Base everything strictly on the headlines given; do not invent facts.")
+    "news), catalysts (array of max 4 objects {type, direction} where type is one of "
+    "earnings_beat/earnings_miss/guidance_raise/guidance_cut/upgrade/downgrade/order_win/"
+    "expansion/buyback/regulatory_action/legal/fraud/management_change and direction is one "
+    "of positive/negative/neutral — only include catalysts actually implied by the "
+    "headlines, else []). Base everything strictly on the headlines given; do not invent facts.")
 
 FUNDAMENTALS_SYSTEM = (
     "You are a financial educator explaining company fundamentals to a retail investor "
@@ -66,6 +70,13 @@ def _call_claude(settings: Settings, system: str, user: str,
               "system": system,
               "messages": [{"role": "user", "content": user}]},
         timeout=45.0)
+    if resp.status_code == 401:
+        raise LlmError(
+            "Anthropic rejected the API key (401). The key in .env is revoked or "
+            "invalid — create a new one at console.anthropic.com → API keys, put it "
+            "in ANTHROPIC_API_KEY, and restart the market-data-service.")
+    if resp.status_code == 429:
+        raise LlmError("Anthropic rate limit hit (429) — wait a minute and retry.")
     if resp.status_code != 200:
         raise LlmError(f"Anthropic API {resp.status_code}: {resp.text[:300]}")
     body = resp.json()

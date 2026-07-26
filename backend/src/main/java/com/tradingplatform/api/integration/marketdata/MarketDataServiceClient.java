@@ -113,6 +113,30 @@ public class MarketDataServiceClient {
     }
 
     @SuppressWarnings("unchecked")
+    public Map<String, Object> getMarketNews(boolean refresh) {
+        try {
+            return http.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/news/market")
+                            .queryParam("refresh", refresh).build())
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Market news service unavailable", ex);
+        }
+    }
+
+    /** Re-pull every market feed, regenerate the macro digest and refresh
+     *  per-stock news for signaled/held symbols. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> refreshAllNews() {
+        try {
+            return http.post().uri("/internal/news/refresh-all")
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("News refresh unavailable", ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
     public Map<String, Object> getFundamentalsInsights(String ticker) {
         try {
             return http.get().uri("/internal/insights/fundamentals/{ticker}", ticker)
@@ -156,6 +180,24 @@ public class MarketDataServiceClient {
     }
 
     @SuppressWarnings("unchecked")
+    public Map<String, Object> getDataHealth() {
+        try {
+            return http.get().uri("/internal/data/health").retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Data health service unavailable", ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getEdgeGates() {
+        try {
+            return http.get().uri("/internal/edge/gates").retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Edge gates service unavailable", ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
     public Map<String, Object> getMomentumBoard() {
         try {
             return http.get().uri("/internal/momentum/board").retrieve().body(Map.class);
@@ -195,6 +237,19 @@ public class MarketDataServiceClient {
     public Map<String, Object> getPortfolioHealth() {
         try {
             return http.get().uri("/internal/portfolio/health").retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Guardian service unavailable", ex);
+        }
+    }
+
+    /** Guardian over paper positions PLUS live broker holdings (read-only import). */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getPortfolioHealthWithLive(List<Map<String, Object>> livePositions) {
+        try {
+            return http.post().uri("/internal/portfolio/health")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("live_positions", livePositions))
+                    .retrieve().body(Map.class);
         } catch (RestClientException ex) {
             throw new UpstreamException("Guardian service unavailable", ex);
         }

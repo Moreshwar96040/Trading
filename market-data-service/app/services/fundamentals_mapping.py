@@ -29,6 +29,24 @@ def _pct(info: dict, key: str) -> float | None:
     return round(v * 100.0, 4) if v is not None else None
 
 
+def _dividend_yield_pct(info: dict) -> float | None:
+    """Dividend yield as a percent, resilient to Yahoo's unit change.
+
+    yfinance used to expose `dividendYield` as a fraction (0.0052) and now
+    exposes it already as a percent (0.52). Blindly multiplying by 100 produced
+    absurd yields (Bajaj Finance 52%, Infosys 453%). Strategy:
+      1. Prefer `trailingAnnualDividendYield` — a fraction in every version.
+      2. Else use `dividendYield`, treating it as already-percent (current
+         library behaviour); a genuine equity yield above ~100% is impossible,
+         so a value >1 is certainly a percent too.
+    """
+    trailing = _num(info, "trailingAnnualDividendYield")
+    if trailing is not None:
+        return round(trailing * 100.0, 4)
+    raw = _num(info, "dividendYield")
+    return round(raw, 4) if raw is not None else None
+
+
 def map_ratios(info: dict) -> dict[str, Any]:
     """Yahoo `Ticker.info` dict → fundamentals row (all values may be None)."""
     d2e = _num(info, "debtToEquity")
@@ -38,7 +56,7 @@ def map_ratios(info: dict) -> dict[str, Any]:
         "pe_forward": _num(info, "forwardPE"),
         "pb": _num(info, "priceToBook"),
         "ps": _num(info, "priceToSalesTrailing12Months"),
-        "dividend_yield_pct": _pct(info, "dividendYield"),
+        "dividend_yield_pct": _dividend_yield_pct(info),
         "roe_pct": _pct(info, "returnOnEquity"),
         "debt_to_equity": round(d2e / 100.0, 4) if d2e is not None else None,
         "profit_margin_pct": _pct(info, "profitMargins"),

@@ -1,17 +1,19 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
+import { shareReplay } from 'rxjs/operators';
 
 import { environment } from '../../../environments/environment';
 import {
   AiPredictionRow, AiRiskPlan, AiUsageSummary, AlertInfo, AlphaStack, BacktestDetail,
   BacktestRunParams, CandleSeries,
+  DataHealth, EdgeGatesReport,
   FundamentalsData, GuardianReport, IndicatorSeries, InsightResponse, JournalEntry,
-  LeaksReport, MomentumBoard, MorningBriefing, NewsResponse, PaperAccount, PaperOrder,
-  RegimeInfo,
+  LeaksReport, LiveHolding, MarketNewsResponse, MomentumBoard, MorningBriefing,
+  NewsRefreshResult, NewsResponse, PaperAccount, PaperOrder, RegimeInfo,
   PositionSizeResult, Quote, RiskReport, RiskSettings, ScreenRequest, ScreenRow,
   ScreenerFieldsMeta, SignalInfo, StrategyDefinition, StrategyInfo, StrategyScore,
-  SymbolInfo, SymbolLookupResult, TradeIdeasResponse,
+  SymbolInfo, SymbolLookupResult, TradeIdeasResponse, UpstoxStatus,
 } from '../models/market-data.models';
 
 /** Single gateway to the backend API — components never build URLs themselves. */
@@ -238,8 +240,19 @@ export class MarketDataService {
     return this.http.get<InsightResponse>(`${this.base}/fundamentals/${ticker}/insights`);
   }
 
+  // Regime is fetched by several components per page (banner, briefing, trade
+  // dialog) — share one request and cache it for 60s instead of refetching.
+  private regimeCache$: Observable<RegimeInfo> | null = null;
+  private regimeCacheAt = 0;
+
   getRegime(): Observable<RegimeInfo> {
-    return this.http.get<RegimeInfo>(`${this.base}/regime`);
+    const now = Date.now();
+    if (!this.regimeCache$ || now - this.regimeCacheAt > 60_000) {
+      this.regimeCacheAt = now;
+      this.regimeCache$ = this.http.get<RegimeInfo>(`${this.base}/regime`)
+        .pipe(shareReplay({ bufferSize: 1, refCount: false }));
+    }
+    return this.regimeCache$;
   }
 
   getLeaksReport(): Observable<LeaksReport> {
@@ -248,6 +261,25 @@ export class MarketDataService {
 
   getAiUsage(): Observable<AiUsageSummary> {
     return this.http.get<AiUsageSummary>(`${this.base}/ai/usage`);
+  }
+
+  getMarketNews(refresh = false): Observable<MarketNewsResponse> {
+    return this.http.get<MarketNewsResponse>(`${this.base}/news/market`,
+                                             { params: { refresh } });
+  }
+
+  /** Re-pull market feeds, regenerate the macro digest and refresh per-stock
+   *  news for signaled/held symbols (fixes a stale/absent macro layer). */
+  refreshAllNews(): Observable<NewsRefreshResult> {
+    return this.http.post<NewsRefreshResult>(`${this.base}/news/refresh`, {});
+  }
+
+  getDataHealth(): Observable<DataHealth> {
+    return this.http.get<DataHealth>(`${this.base}/data/health`);
+  }
+
+  getEdgeGates(): Observable<EdgeGatesReport> {
+    return this.http.get<EdgeGatesReport>(`${this.base}/edge/gates`);
   }
 
   getMomentumBoard(): Observable<MomentumBoard> {
@@ -270,6 +302,23 @@ export class MarketDataService {
 
   getBriefing(force = false): Observable<MorningBriefing> {
     return this.http.get<MorningBriefing>(`${this.base}/briefing`, { params: { force } });
+  }
+
+  // ---- Upstox (read-only) -------------------------------------------------
+  getUpstoxStatus(): Observable<UpstoxStatus> {
+    return this.http.get<UpstoxStatus>(`${this.base}/upstox/status`);
+  }
+
+  getUpstoxLoginUrl(): Observable<{ url: string }> {
+    return this.http.get<{ url: string }>(`${this.base}/upstox/login-url`);
+  }
+
+  getUpstoxHoldings(): Observable<LiveHolding[]> {
+    return this.http.get<LiveHolding[]>(`${this.base}/upstox/holdings`);
+  }
+
+  disconnectUpstox(): Observable<UpstoxStatus> {
+    return this.http.post<UpstoxStatus>(`${this.base}/upstox/disconnect`, {});
   }
 
   updatePositionStop(ticker: string, stopPrice: number):

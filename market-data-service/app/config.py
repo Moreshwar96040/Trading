@@ -29,6 +29,24 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-haiku-4-5"
     anthropic_max_tokens: int = 1000
     news_max_articles: int = 12             # per symbol, per fetch
+    # Per-STOCK news feeds, "Name|url-template" comma-separated. Placeholders:
+    # {query} = URL-encoded '"Company Name" OR "TICKER"', {symbol} = Yahoo symbol.
+    # yfinance's news API covers only a fraction of NSE tickers, so these keyless
+    # RSS sources are fanned out and merged per symbol (see stock_news_sources.py).
+    stock_news_feeds: str = (
+        "GoogleNews|https://news.google.com/rss/search?q={query}+when:21d&hl=en-IN&gl=IN&ceid=IN:en,"
+        "BingNews|https://www.bing.com/news/search?q={query}&format=RSS,"
+        "YahooRSS|https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=IN&lang=en-IN")
+    stock_news_max_age_days: int = 21       # ignore headlines older than this
+    # Market-wide RSS feeds, "Name|url" comma-separated. Defaults: WSJ (official
+    # Dow Jones feed), FT markets, Google News India business (carries syndicated
+    # Reuters/Bloomberg reporting), Economic Times & Mint markets.
+    market_news_feeds: str = (
+        "WSJ|https://feeds.content.dowjones.io/public/rss/RSSMarketsMain,"
+        "FT|https://www.ft.com/markets?format=rss,"
+        "GoogleNews-IN|https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-IN&gl=IN&ceid=IN:en,"
+        "EconomicTimes|https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms,"
+        "Mint|https://www.livemint.com/rss/markets")
     # $/million tokens for cost tracking (match your model's price card)
     anthropic_price_input_per_mtok: float = 1.0
     anthropic_price_output_per_mtok: float = 5.0

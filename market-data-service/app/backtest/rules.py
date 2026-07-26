@@ -14,6 +14,9 @@ from app.indicators import core
 OPS = {"gt", "gte", "lt", "lte", "crosses_above", "crosses_below"}
 _PRICE_COLUMNS = {"close", "open", "high", "low", "volume"}
 _PARAM_PATTERN = re.compile(r"^(sma|ema|rsi|atr)_(\d{1,3})$")
+#: vol_sma_N = N-bar simple average of VOLUME (e.g. "volume gt vol_sma_20" =
+#: today's volume above its 20-bar average — the honest "volume surge" filter).
+_VOL_PATTERN = re.compile(r"^vol_sma_(\d{1,3})$")
 _MACD_NAMES = {"macd", "macd_signal", "macd_hist"}
 _BB_NAMES = {"bb_upper", "bb_mid", "bb_lower"}
 #: Ichimoku lines + derived cloud edges. Chikou is intentionally excluded: it is
@@ -42,7 +45,8 @@ def is_valid_series(name: str) -> bool:
     return (name in _PRICE_COLUMNS or name in _MACD_NAMES or name in _BB_NAMES
             or name in _ICHIMOKU_NAMES or name in _SR_NAMES
             or name in FUNDAMENTAL_FIELDS or name in CROSS_SECTIONAL_FIELDS
-            or _PARAM_PATTERN.match(name) is not None)
+            or _PARAM_PATTERN.match(name) is not None
+            or _VOL_PATTERN.match(name) is not None)
 
 
 def cross_sectional_fields_used(rules: list[dict]) -> set[str]:
@@ -103,6 +107,12 @@ def resolve_series(df: pd.DataFrame, name: str) -> pd.Series:
             return df[name].astype(float)
         raise RuleError(f"'{name}' is cross-sectional — it is only available inside "
                         "backtests (the service injects it per universe)")
+    vol_match = _VOL_PATTERN.match(name)
+    if vol_match:
+        period = int(vol_match.group(1))
+        if period < 1:
+            raise RuleError(f"period must be >= 1 in '{name}'")
+        return core.sma(df["volume"].astype(float), period)
     match = _PARAM_PATTERN.match(name)
     if match:
         kind, period = match.group(1), int(match.group(2))

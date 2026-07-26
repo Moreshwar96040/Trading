@@ -14,10 +14,11 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 
 import {
-  AlphaSetup, AlphaStack, SignalInfo, SymbolLookupResult,
+  AlphaSetup, AlphaStack, NewsRefreshResult, SignalInfo, SymbolLookupResult,
 } from '../../core/models/market-data.models';
 import { MarketDataService } from '../../core/services/market-data.service';
 import { TradeSignalDialogComponent } from '../strategies/trade-signal-dialog.component';
+import { StockNewsDialogComponent } from './stock-news-dialog.component';
 
 /**
  * The Alpha Stack: every live setup ranked by conviction — the fusion of
@@ -64,6 +65,17 @@ import { TradeSignalDialogComponent } from '../strategies/trade-signal-dialog.co
           <mat-icon>layers</mat-icon> Back to live setups
         </button>
       }
+      <button mat-flat-button class="refresh-news" (click)="refreshNews()"
+              [disabled]="refreshingNews() || loading() || seeding()"
+              matTooltip="Re-pull market feeds, regenerate the macro digest and
+                          refresh news for these stocks">
+        @if (refreshingNews()) {
+          <mat-spinner diameter="18" />
+        } @else {
+          <mat-icon>newspaper</mat-icon>
+        }
+        {{ refreshingNews() ? 'Refreshing news…' : 'Refresh news' }}
+      </button>
     </div>
 
     @if (seeding()) {
@@ -76,7 +88,13 @@ import { TradeSignalDialogComponent } from '../strategies/trade-signal-dialog.co
         </div>
       </mat-card>
     } @else if (loading()) {
-      <div class="spinner"><mat-spinner diameter="36" /></div>
+      <div class="spinner">
+        <mat-spinner diameter="36" />
+        @if (analyzed()) {
+          <p class="loading-note">Scoring {{ query.toUpperCase() }} — first analysis
+            also pulls its latest news and builds the AI digest (10-30s)…</p>
+        }
+      </div>
     } @else if (stack()) {
       @if (stack(); as st) {
       @if (st.setups.length) {
@@ -107,15 +125,23 @@ import { TradeSignalDialogComponent } from '../strategies/trade-signal-dialog.co
                 </div>
                 <div class="layers">
                   @for (b of s.breakdown; track b.layer) {
-                    <div class="layer" [matTooltip]="b.note"
-                         [class.pos]="b.points > 0" [class.neg]="b.points < 0">
+                    <div class="layer" [matTooltip]="layerTooltip(b)"
+                         [class.pos]="b.strength >= 0.6" [class.neg]="b.strength <= 0.4">
                       <mat-icon>{{ layerIcon(b.layer) }}</mat-icon>
-                      <span>{{ b.points > 0 ? '+' : '' }}{{ b.points }}</span>
+                      <span>{{ b.points }}<span class="of-max">/{{ b.max }}</span></span>
                     </div>
                   }
                   @if (s.quality) {
                     <span class="grade" [matTooltip]="'Business quality ' + s.quality.score + '/100'">
                       grade {{ s.quality.grade }}</span>
+                  }
+                  @if (s.news_score !== null && s.news_score !== undefined) {
+                    <button type="button" class="news-score" [class]="'news-score ' + newsScoreClass(s.news_score)"
+                            (click)="openNews(s)"
+                            matTooltip="News sentiment score /10 — click to read the headlines">
+                      <mat-icon>newspaper</mat-icon>
+                      <span>{{ s.news_score | number: '1.1-1' }}/10</span>
+                    </button>
                   }
                 </div>
                 <p class="strategies">
@@ -153,9 +179,16 @@ import { TradeSignalDialogComponent } from '../strategies/trade-signal-dialog.co
     .search-row { display: flex; gap: 12px; align-items: center; margin-bottom: 6px;
                   flex-wrap: wrap; }
     .search-field { min-width: 300px; }
+    .refresh-news { margin-left: auto; background: rgba(129,140,248,0.16);
+                    color: var(--accent-2); font-weight: 600; }
+    .refresh-news:not(:disabled):hover { background: rgba(129,140,248,0.28); }
+    .refresh-news mat-spinner { display: inline-block; margin-right: 6px;
+                                vertical-align: middle; }
     .lede { color: var(--text-dim); font-size: 13.5px; margin: -6px 0 18px; }
     .lede em { color: var(--accent); font-style: normal; font-weight: 600; }
-    .spinner { display: flex; justify-content: center; padding: 40px; }
+    .spinner { display: flex; flex-direction: column; align-items: center; gap: 14px;
+               padding: 40px; }
+    .loading-note { color: var(--text-dim); font-size: 13px; margin: 0; }
 
     .stack { display: flex; flex-direction: column; gap: 12px; }
     .setup {
@@ -196,9 +229,21 @@ import { TradeSignalDialogComponent } from '../strategies/trade-signal-dialog.co
       border: 1px solid var(--card-border); color: var(--text-dim);
     }
     .layer mat-icon { font-size: 14px; width: 14px; height: 14px; }
+    .of-max { opacity: 0.5; font-weight: 500; }
     .layer.pos { color: var(--up); border-color: rgba(38,166,154,0.35); }
     .layer.neg { color: var(--down); border-color: rgba(239,83,80,0.35); }
     .grade { font-size: 11px; font-weight: 700; color: var(--accent-2); cursor: help; }
+    .news-score {
+      display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+      font: 700 12px Inter, sans-serif; padding: 3px 9px; border-radius: 999px;
+      border: 1px solid var(--card-border); background: transparent; color: var(--text-dim);
+      transition: background 0.15s, color 0.15s;
+    }
+    .news-score:hover { background: rgba(128,128,128,0.12); }
+    .news-score mat-icon { font-size: 14px; width: 14px; height: 14px; }
+    .news-score.good { color: var(--up); border-color: rgba(38,166,154,0.4); }
+    .news-score.mid { color: #ffb74d; border-color: rgba(255,183,77,0.4); }
+    .news-score.bad { color: var(--down); border-color: rgba(239,83,80,0.4); }
     .strategies { font-size: 12px; color: var(--text-dim); margin: 2px 0 0; }
 
     .act { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
@@ -230,9 +275,12 @@ export class AlphaStackPageComponent implements OnInit {
   readonly loading = signal(true);
   readonly analyzed = signal(false);
   readonly seeding = signal(false);
+  readonly refreshingNews = signal(false);
   readonly suggestions = signal<SymbolLookupResult[]>([]);
   query = '';
   private suggestTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Whatever view we're on, so a news refresh reloads the same thing. */
+  private currentTicker: string | undefined;
 
   private readonly route = inject(ActivatedRoute);
 
@@ -274,7 +322,45 @@ export class AlphaStackPageComponent implements OnInit {
     this.load(ticker);
   }
 
+  /** Refresh every news input the conviction engine reads, then re-score.
+   *  Scoring itself never calls an LLM — this is what makes the cached digests
+   *  it reads current. */
+  refreshNews(): void {
+    this.refreshingNews.set(true);
+    this.api.refreshAllNews().subscribe({
+      next: (r) => {
+        this.refreshingNews.set(false);
+        this.snackBar.open(this.refreshMessage(r), 'Dismiss', { duration: 6000 });
+        this.load(this.currentTicker);          // re-score with the fresh news
+      },
+      error: () => {
+        this.refreshingNews.set(false);
+        this.snackBar.open('News refresh failed — is the data service running?',
+                           'Dismiss', { duration: 5000 });
+      },
+    });
+  }
+
+  private refreshMessage(r: NewsRefreshResult): string {
+    const parts = [`${r.market.inserted} new headlines`];
+    if (r.macro_sentiment) {
+      parts.push(`macro tone ${r.macro_sentiment}`);
+    } else if (r.macro_error) {
+      parts.push(`macro digest failed: ${r.macro_error}`);
+    } else {
+      parts.push('no macro digest (set ANTHROPIC_API_KEY?)');
+    }
+    if (r.signal_news.processed) {
+      parts.push(`${r.signal_news.processed} stocks re-read`);
+    }
+    if (r.market.failures.length) {
+      parts.push(`${r.market.failures.length} feed(s) unreachable`);
+    }
+    return parts.join(' · ');
+  }
+
   private load(ticker: string | undefined): void {
+    this.currentTicker = ticker;
     this.loading.set(true);
     this.api.getAlphaStack(ticker).subscribe({
       next: (s) => {
@@ -329,13 +415,34 @@ export class AlphaStackPageComponent implements OnInit {
     });
   }
 
+  /** Name the layer and its weight, so "12.6/18" is self-explaining. */
+  layerTooltip(b: AlphaSetup['breakdown'][number]): string {
+    const label = { technical: 'Technical (timing)', quality: 'Fundamentals (quality)',
+                    news: 'News sentiment', momentum: 'Relative strength',
+                    ml: 'ML vote', macro: 'Market-wide news', regime: 'Market regime',
+                  }[b.layer] ?? b.layer;
+    return `${label} — ${b.points} of ${b.max} points\n${b.note}`;
+  }
+
   layerIcon(layer: string): string {
     return { technical: 'candlestick_chart', quality: 'account_balance',
-             news: 'newspaper', ml: 'psychology', regime: 'radar' }[layer] ?? 'circle';
+             news: 'newspaper', momentum: 'speed', macro: 'public',
+             ml: 'psychology', regime: 'radar' }[layer] ?? 'circle';
   }
 
   strategyNames(s: AlphaSetup): string {
     return s.strategies.map((st) => st.name).join(', ');
+  }
+
+  newsScoreClass(score: number): string {
+    return score >= 6.5 ? 'good' : score >= 4 ? 'mid' : 'bad';
+  }
+
+  openNews(s: AlphaSetup): void {
+    this.dialog.open(StockNewsDialogComponent, {
+      data: { ticker: s.ticker, name: s.name, score: s.news_score },
+      autoFocus: false, width: '560px',
+    });
   }
 
   trade(s: AlphaSetup): void {

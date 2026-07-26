@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, ElementRef, OnInit, ViewChild, computed, inject, signal } from '@angular/core';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { MatAutocompleteModule, MatAutocompleteSelectedEvent } from '@angular/material/autocomplete';
 import { MatButtonModule } from '@angular/material/button';
@@ -11,6 +11,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTableModule } from '@angular/material/table';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { debounceTime, distinctUntilChanged, filter, switchMap } from 'rxjs';
 import { toSignal } from '@angular/core/rxjs-interop';
@@ -34,7 +35,7 @@ const CRORE = 1e7;
   imports: [CommonModule, ReactiveFormsModule, MatFormFieldModule, MatInputModule,
             MatAutocompleteModule, MatCardModule, MatButtonModule, MatIconModule,
             MatProgressSpinnerModule, MatSnackBarModule, MatTableModule,
-            MatButtonToggleModule, RouterLink],
+            MatButtonToggleModule, MatTooltipModule, RouterLink],
   template: `
     <div class="controls">
       <mat-form-field appearance="outline" class="search">
@@ -69,6 +70,41 @@ const CRORE = 1e7;
 
     @if (data(); as d) {
       <h2>{{ d.name }} <span class="sector-tag">{{ d.sector }}</span></h2>
+
+      <!-- ======= overall news sentiment, in short =======
+           Always rendered: an absent digest is a state to explain, not to hide. -->
+      @if (newsLoading()) {
+        <div class="sentiment-strip loading">
+          <mat-spinner diameter="16" /> Reading the news for {{ d.ticker }}…
+        </div>
+      } @else {
+        <!-- The "as" alias binds only on a primary @if, so the digest check
+             nests here rather than riding on an @else if. -->
+        @if (newsInsight(); as ni) {
+          <div class="sentiment-strip" (click)="scrollToNews()"
+               matTooltip="Jump to the full news digest">
+            <mat-icon>newspaper</mat-icon>
+            @if (ni.sentiment) {
+              <span class="verdict" [class]="'verdict sentiment-' + ni.sentiment">{{ ni.sentiment }}</span>
+            }
+            <span class="sentiment-line">{{ shortSentiment(ni) }}</span>
+          </div>
+        } @else {
+          <div class="sentiment-strip empty">
+            <mat-icon>newspaper</mat-icon>
+            <span class="sentiment-line">{{ noSentimentReason() }}</span>
+            @if (news().length || newsFetchError()) {
+              <button mat-stroked-button class="strip-action" (click)="refreshNews()">
+                <mat-icon>refresh</mat-icon> Retry
+              </button>
+            } @else {
+              <button mat-flat-button class="strip-action" (click)="refreshNews()">
+                <mat-icon>cloud_download</mat-icon> Fetch news
+              </button>
+            }
+          </div>
+        }
+      }
 
       @if (d.ratios; as r) {
         <div class="cards">
@@ -163,10 +199,17 @@ const CRORE = 1e7;
           <tr mat-header-row *matHeaderRowDef="stmtColumnKeys"></tr>
           <tr mat-row *matRowDef="let s; columns: stmtColumnKeys"></tr>
         </table>
+      } @else if (d.ratios) {
+        <div class="stmt-header">
+          <h3>Financial statements</h3>
+        </div>
+        <p class="hint">No statements stored for {{ d.ticker }} — Yahoo sometimes
+          returns none on the first pull. Hit "Refresh fundamentals" above to retry;
+          if it stays empty, Yahoo has no statement data for this listing.</p>
       }
 
       <!-- ============ news & AI digest ============ -->
-      <div class="stmt-header news-header">
+      <div class="stmt-header news-header" #newsSection>
         <h3>Latest news</h3>
         <button mat-stroked-button (click)="refreshNews()" [disabled]="newsLoading()">
           <mat-icon>refresh</mat-icon>
@@ -186,6 +229,15 @@ const CRORE = 1e7;
           @if (ni.key_points?.length) {
             <ul>@for (p of ni.key_points; track p) { <li>{{ p }}</li> }</ul>
           }
+          @if (ni.catalysts?.length) {
+            <div class="catalysts">
+              @for (c of ni.catalysts; track c.type) {
+                <span class="catalyst" [class]="'catalyst catalyst-' + c.direction">
+                  {{ c.type.replace('_', ' ') }}
+                </span>
+              }
+            </div>
+          }
           @if (ni.watch_for?.length) {
             <p class="watch-for"><strong>Watch for:</strong> {{ ni.watch_for!.join(' · ') }}</p>
           }
@@ -201,7 +253,12 @@ const CRORE = 1e7;
           }
         </div>
       } @else if (!newsLoading()) {
-        <p class="hint">No stored news yet — hit "Refresh news".</p>
+        @if (newsFetchError(); as err) {
+          <p class="hint fetch-error"><mat-icon>error_outline</mat-icon>
+            News fetch from Yahoo failed: {{ err }}</p>
+        } @else {
+          <p class="hint">No stored news yet — hit "Refresh news".</p>
+        }
       }
     } @else if (!loading()) {
       <p class="hint">Search for a symbol to see its fundamentals.</p>
@@ -214,6 +271,16 @@ const CRORE = 1e7;
     .name { opacity: 0.6; font-size: 12px; }
     h2 { font-weight: 500; margin: 8px 0 16px; }
     .sector-tag { font-size: 13px; opacity: 0.6; font-weight: 400; margin-left: 8px; }
+    .sentiment-strip { display: flex; align-items: center; gap: 10px; cursor: pointer;
+                       padding: 8px 12px; margin: 0 0 16px; border-radius: 10px;
+                       border: 1px solid rgba(128,128,128,0.18); }
+    .sentiment-strip:hover { background: rgba(128,128,128,0.06); }
+    .sentiment-strip.loading { cursor: default; opacity: 0.7; font-size: 13px; }
+    .sentiment-strip.empty { cursor: default; }
+    .sentiment-strip.empty:hover { background: none; }
+    .strip-action { margin-left: auto; flex-shrink: 0; }
+    .sentiment-strip mat-icon { font-size: 18px; width: 18px; height: 18px; opacity: 0.7; }
+    .sentiment-line { font-size: 13.5px; line-height: 1.4; }
     .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
              gap: 12px; }
     .ratio-card { padding: 14px; display: flex; flex-direction: column; gap: 4px; }
@@ -227,6 +294,9 @@ const CRORE = 1e7;
     .down { color: #ef5350; }
     .spinner { display: flex; justify-content: center; padding: 24px; }
     .hint { opacity: 0.6; margin-top: 16px; }
+    .fetch-error { display: flex; align-items: center; gap: 6px; color: #ef5350;
+                   opacity: 0.9; font-size: 13px; }
+    .fetch-error mat-icon { font-size: 17px; width: 17px; height: 17px; }
     .insight-card { padding: 16px 20px; margin: 16px 0; }
     .insight-loading { display: flex; align-items: center; gap: 12px; opacity: 0.7; }
     .insight-header { display: flex; align-items: center; gap: 8px; }
@@ -253,6 +323,12 @@ const CRORE = 1e7;
     .metric-meaning { opacity: 0.75; line-height: 1.4; }
     .disclaimer { font-size: 11px; opacity: 0.45; margin: 12px 0 0; }
     .watch-for { font-size: 13px; opacity: 0.85; }
+    .catalysts { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+    .catalyst { font-size: 11px; text-transform: capitalize; padding: 2px 8px;
+      border-radius: 10px; background: #ffffff14; }
+    .catalyst-positive { background: #1b5e2033; color: #66bb6a; }
+    .catalyst-negative { background: #b71f1f33; color: #ef5350; }
+    .catalyst-neutral { background: #f57f1733; color: #ffb74d; }
     .news-header { margin-top: 24px; }
     .news-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
     .news-item { display: flex; flex-direction: column; padding: 10px 12px; border-radius: 8px;
@@ -268,6 +344,8 @@ export class FundamentalsPageComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly snackBar = inject(MatSnackBar);
 
+  @ViewChild('newsSection') newsSection?: ElementRef<HTMLElement>;
+
   readonly searchControl = new FormControl('', { nonNullable: true });
   readonly data = signal<FundamentalsData | null>(null);
   readonly loading = signal(false);
@@ -280,6 +358,9 @@ export class FundamentalsPageComponent implements OnInit {
   readonly news = signal<NewsArticle[]>([]);
   readonly newsInsight = signal<NewsInsight | null>(null);
   readonly newsLoading = signal(false);
+  readonly newsFetchError = signal<string | null>(null);
+  readonly newsLlmEnabled = signal(true);
+  readonly newsInsightError = signal<string | null>(null);
 
   readonly stmtCols = [
     { key: 'revenue', label: 'Revenue', signed: false },
@@ -372,6 +453,42 @@ export class FundamentalsPageComponent implements OnInit {
     if (ticker) this.loadNews(ticker, true);
   }
 
+  /** Why there's no sentiment line — each case has a different fix, so name it
+   *  rather than showing an empty space. */
+  noSentimentReason(): string {
+    const llmErr = this.newsInsightError();
+    if (llmErr) return `AI digest failed — ${llmErr}`;
+    const err = this.newsFetchError();
+    if (err) return `Couldn't fetch news — ${err}`;
+    if (!this.newsLlmEnabled()) {
+      return this.news().length
+        ? 'Headlines below, but AI sentiment is off — set ANTHROPIC_API_KEY in .env.'
+        : 'No headlines stored yet, and AI sentiment is off (set ANTHROPIC_API_KEY).';
+    }
+    if (!this.news().length) return 'No headlines stored for this stock yet.';
+    return 'Headlines are stored but the AI digest has not been generated yet.';
+  }
+
+  /** A one-line overall read for the top strip: prefer the digest summary, else
+   *  fall back to a plain sentence built from the sentiment. */
+  shortSentiment(ni: NewsInsight): string {
+    if (ni.summary) {
+      const first = ni.summary.split(/(?<=[.!?])\s/)[0].trim();
+      return first.length > 160 ? first.slice(0, 157).trimEnd() + '…' : first;
+    }
+    const map: Record<string, string> = {
+      positive: 'Recent news reads positive overall.',
+      negative: 'Recent news reads negative overall.',
+      neutral: 'Recent news is broadly neutral.',
+      mixed: 'Recent news is mixed.',
+    };
+    return map[ni.sentiment ?? ''] ?? 'News digest available below.';
+  }
+
+  scrollToNews(): void {
+    this.newsSection?.nativeElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   private load(ticker: string): void {
     this.loading.set(true);
     this.api.getFundamentals(ticker).subscribe({
@@ -409,14 +526,31 @@ export class FundamentalsPageComponent implements OnInit {
       next: (resp) => {
         this.newsLoading.set(false);
         this.news.set(resp.articles);
+        this.newsFetchError.set(resp.fetch_error ?? null);
+        this.newsLlmEnabled.set(resp.llm_enabled);
+        this.newsInsightError.set(this.insightError(resp.insight));
         this.newsInsight.set(this.unwrap<NewsInsight>(resp.insight));
       },
       error: () => {
         this.newsLoading.set(false);
         this.news.set([]);
+        this.newsFetchError.set('news service unreachable');
         this.newsInsight.set(null);
       },
     });
+  }
+
+  /** Pull the failure reason out of an insight envelope. `unwrap` deliberately
+   *  returns null for these, which previously made a real LLM failure look
+   *  identical to "no digest yet" — the reason must reach the user. */
+  private insightError(raw: unknown): string | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const inner = obj['insight'];
+    const err = obj['error']
+      ?? (inner && typeof inner === 'object'
+          ? (inner as Record<string, unknown>)['error'] : undefined);
+    return typeof err === 'string' ? err : null;
   }
 
   /** The API wraps cached insights as {insight, generated_at, cached}; errors as {error}. */

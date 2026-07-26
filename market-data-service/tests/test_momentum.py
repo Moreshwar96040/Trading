@@ -92,6 +92,30 @@ def test_rs_rank_for_symbol(session: Session):
     assert rs_rank_for_symbol(session, lag.id) < 50.0
 
 
+def test_board_uses_true_panel_when_history_exists(session: Session):
+    """One RS definition everywhere: with enough daily bars stored, the board's
+    rank must come from the same panel the backtester uses — not the proxy."""
+    from app.models import OhlcvDaily
+
+    up = _snap(session, "UP", 5, 10, 20)      # proxy would rank these differently
+    down = _snap(session, "DOWN", 8, 15, 30)  # proxy favourite (bigger snapshot returns)
+    _snap(session, "MID3", 1, 2, 3)           # board needs a >=3-stock universe
+    # ...but true daily history says UP is the climber and DOWN the faller
+    for i in range(140):
+        d = date(2026, 1, 1) + timedelta(days=i)
+        session.add(OhlcvDaily(symbol_id=up.id, trade_date=d, open=100, high=101,
+                               low=99, close=100 * (1.004 ** i), volume=1000))
+        session.add(OhlcvDaily(symbol_id=down.id, trade_date=d, open=100, high=101,
+                               low=99, close=100 * (0.997 ** i), volume=1000))
+    session.commit()
+
+    board = momentum_board(session)
+    ranks = {s["ticker"]: s for s in board["top"]}
+    assert ranks["UP"]["rs_source"] == "panel"
+    assert ranks["UP"]["rs_rank"] > ranks["DOWN"]["rs_rank"]
+    assert rs_rank_for_symbol(session, up.id) == ranks["UP"]["rs_rank"]
+
+
 # ---------- rs_rank in the rules engine ----------
 
 def test_rs_rank_rule_validates_and_resolves():

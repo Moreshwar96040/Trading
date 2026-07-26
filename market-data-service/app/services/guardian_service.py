@@ -29,8 +29,10 @@ TRAIL_ATR_MULT = 2.5       # suggested stop = close - mult * ATR(14)
 CONCENTRATION_PCT = 50.0   # one sector holding more than this = flag
 
 
-def position_health(session: Session) -> dict:
-    rows = session.execute(text("""
+def position_health(session: Session, live_positions: list[dict] | None = None) -> dict:
+    """`live_positions`: optional real-broker holdings [{ticker, quantity, avg_cost,
+    stop_price?}] (e.g. from Upstox) — merged into the same checks, marked LIVE."""
+    rows = [dict(r) | {"source": "PAPER"} for r in session.execute(text("""
         SELECT p.quantity, p.avg_cost, p.stop_price, p.target_price, p.strategy_id,
                s.id AS symbol_id, s.ticker, s.name, s.sector,
                snap.close, snap.atr_14, snap.sma_200, snap.as_of_date
@@ -38,7 +40,33 @@ def position_health(session: Session) -> dict:
         JOIN symbols s ON s.id = p.symbol_id
         LEFT JOIN screener_snapshot snap ON snap.symbol_id = s.id
         WHERE p.quantity > 0
-    """)).mappings().all()
+    """)).mappings().all()]
+
+    # Live broker holdings join the same pipeline: look up our symbol + snapshot
+    # by ticker so every check (stop, trend, ATR trail...) applies to real money too.
+    for lp in live_positions or []:
+        ticker = str(lp.get("ticker", "")).upper()
+        if not ticker or not lp.get("quantity"):
+            continue
+        meta = session.execute(text("""
+            SELECT s.id AS symbol_id, s.ticker, s.name, s.sector,
+                   snap.close, snap.atr_14, snap.sma_200, snap.as_of_date
+            FROM symbols s
+            LEFT JOIN screener_snapshot snap ON snap.symbol_id = s.id
+            WHERE s.ticker = :t AND s.active
+        """), {"t": ticker}).mappings().first()
+        base = dict(meta) if meta is not None else {
+            "symbol_id": None, "ticker": ticker, "name": ticker, "sector": None,
+            "close": None, "atr_14": None, "sma_200": None, "as_of_date": None}
+        rows.append(base | {
+            "quantity": int(lp["quantity"]),
+            "avg_cost": float(lp.get("avg_cost") or 0),
+            "stop_price": lp.get("stop_price"),
+            "target_price": lp.get("target_price"),
+            "strategy_id": None,
+            "close": lp.get("last_price") or base.get("close"),
+            "source": "LIVE",
+        })
 
     if not rows:
         return {"status": "NO_POSITIONS",
@@ -70,16 +98,20 @@ def position_health(session: Session) -> dict:
         total_value += value
         sector_value[r["sector"] or "Unknown"] += value
 
+        source = r.get("source", "PAPER")
+        tag = "[LIVE] " if source == "LIVE" else ""
         pos = {"ticker": r["ticker"], "name": r["name"], "sector": r["sector"],
                "quantity": qty, "avg_cost": round(avg_cost, 2), "close": close,
                "stop_price": stop, "target_price": target,
                "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
+               "source": source,
                "checks": []}
 
         def flag(severity: str, kind: str, txt: str, **extra) -> None:
             pos["checks"].append(kind)
             actions.append({"severity": severity, "kind": kind,
-                            "ticker": r["ticker"], "text": txt, **extra})
+                            "ticker": r["ticker"], "source": source,
+                            "text": tag + txt, **extra})
 
         if stop is None:
             unbounded.append(r["ticker"])

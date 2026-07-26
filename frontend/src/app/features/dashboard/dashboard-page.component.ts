@@ -11,6 +11,8 @@ import {
 } from '../../core/models/market-data.models';
 import { MarketDataService } from '../../core/services/market-data.service';
 import { BriefingCardComponent } from './briefing-card.component';
+import { DataHealthCardComponent } from './data-health-card.component';
+import { MarketPulseCardComponent } from './market-pulse-card.component';
 import { GuardianPanelComponent } from './guardian-panel.component';
 import { RegimeBannerComponent } from './regime-banner.component';
 
@@ -21,12 +23,18 @@ import { RegimeBannerComponent } from './regime-banner.component';
   standalone: true,
   imports: [CommonModule, RouterLink, MatCardModule, MatButtonModule, MatIconModule,
             MatTooltipModule, RegimeBannerComponent, BriefingCardComponent,
-            GuardianPanelComponent],
+            DataHealthCardComponent, GuardianPanelComponent, MarketPulseCardComponent],
   template: `
     <h2>Trade Desk</h2>
 
+    <!-- ============ how fresh is the data under every score? ============ -->
+    <app-data-health-card />
+
     <!-- ============ market regime: what kind of tape is this? ============ -->
     <app-regime-banner />
+
+    <!-- ============ the news tape, distilled (feeds the macro layer) ============ -->
+    <app-market-pulse-card />
 
     <!-- ============ the morning plan + the action queue ============ -->
     <app-briefing-card />

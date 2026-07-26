@@ -97,6 +97,34 @@ def test_trend_flip_when_below_sma200(session: Session):
     assert "TREND_FLIP" in kinds
 
 
+def test_live_positions_merge_into_checks(session: Session):
+    """Real broker holdings (Upstox import) get the same checks, tagged LIVE —
+    including the ones with no stop (which is exactly why they need watching)."""
+    sym = _setup(session)
+    _snapshot(session, sym, close=3000, sma200=3200)   # below 200-day too
+    report = position_health(session, live_positions=[
+        {"ticker": "TCS", "quantity": 25, "avg_cost": 2800, "last_price": 3000},
+    ])
+    assert report["status"] == "OK"
+    live = next(p for p in report["positions"] if p["source"] == "LIVE")
+    assert live["ticker"] == "TCS" and live["quantity"] == 25
+    kinds = {a["kind"]: a for a in report["actions"]}
+    assert kinds["STOP_MISSING"]["source"] == "LIVE"
+    assert kinds["STOP_MISSING"]["text"].startswith("[LIVE]")
+    assert "TREND_FLIP" in kinds
+
+
+def test_live_unknown_ticker_still_watched(session: Session):
+    """A holding we've never synced still shows up (no snapshot checks, but visible)."""
+    _setup(session)
+    report = position_health(session, live_positions=[
+        {"ticker": "UNKNOWNCO", "quantity": 10, "avg_cost": 100},
+    ])
+    assert report["status"] == "OK"
+    assert any(p["ticker"] == "UNKNOWNCO" and p["source"] == "LIVE"
+               for p in report["positions"])
+
+
 def test_stop_exposure_summary_present(session: Session):
     sym = _setup(session)
     _snapshot(session, sym, close=3000)

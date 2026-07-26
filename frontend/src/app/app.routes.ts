@@ -51,11 +51,9 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./features/journal/journal-page.component').then((m) => m.JournalPageComponent),
   },
-  {
-    path: 'ai',
-    loadComponent: () =>
-      import('./features/ai/ai-page.component').then((m) => m.AiPageComponent),
-  },
+  // AI Ideas was superseded by the Alpha Stack (same inputs, better output) —
+  // one scoring system, not two that disagree.
+  { path: 'ai', redirectTo: 'alpha' },
   {
     path: 'alpha',
     loadComponent: () =>

@@ -199,6 +199,57 @@ export interface RegimeInfo {
   note?: string;
 }
 
+export interface MacroDigest {
+  sentiment?: 'positive' | 'negative' | 'neutral' | 'mixed';
+  stance?: string;
+  key_events?: string[];
+  risk_flags?: string[];
+}
+
+export interface MarketNewsResponse {
+  llm_enabled: boolean;
+  headlines: { source: string; title: string; link: string | null;
+               published_at: string | null }[];
+  digest: { insight?: MacroDigest; error?: string; cached?: boolean } | null;
+}
+
+/** Result of POST /news/refresh — feeds re-pulled, macro digest regenerated,
+ *  per-stock news refreshed for signaled/held symbols. */
+export interface NewsRefreshResult {
+  market: { fetched: number; inserted: number; failures: string[] };
+  macro_sentiment: 'positive' | 'negative' | 'neutral' | 'mixed' | null;
+  macro_error: string | null;
+  signal_news: { processed: number; failures: number };
+}
+
+export interface DataHealth {
+  symbols_active: number;
+  daily: { last_bar: string; first_bar: string; rows: number };
+  snapshot: { as_of: string };
+  fundamentals: { symbols: number; oldest: string };
+  intraday: { last_bar: string; rows: number };
+  signals: { as_of: string };
+  last_sync: { status: string | null; finished_at: string };
+}
+
+export interface EdgeGate {
+  status: 'PASS' | 'FAIL' | 'PENDING';
+  detail: string;
+}
+
+export interface EdgeGatesReport {
+  status: 'OK' | 'NO_STRATEGIES';
+  note?: string;
+  thresholds: { backtest_trades: number; robustness: number; paper_trades: number };
+  strategies: {
+    strategy_id: number;
+    name: string;
+    description: string | null;
+    verdict: 'VALIDATED' | 'IN_PROGRESS' | 'UNTESTED' | 'FAILED';
+    gates: { sample: EdgeGate; robustness: EdgeGate; paper: EdgeGate; live_edge: EdgeGate };
+  }[];
+}
+
 export interface MomentumStock {
   ticker: string;
   name: string;
@@ -246,10 +297,17 @@ export interface AlphaSetup {
   conviction: number;
   risk_multiplier: number;
   news_veto: boolean;
+  news_score: number | null;
   quality: QualityScore | null;
   sentiment: string | null;
   verdict: 'HIGH' | 'NORMAL' | 'SMALL' | 'STAND_ASIDE' | 'VETOED';
-  breakdown: { layer: string; points: number; note: string }[];
+  /** Each layer contributes `points` out of `max` (the layer's weight); the
+   *  maxes sum to 100, so conviction is a literal percentage. `strength` is the
+   *  0-1 normalized read, where 0.5 means neutral/unknown. */
+  breakdown: {
+    layer: string; points: number; max: number; strength: number;
+    score_out_of_10?: number | null; note: string;
+  }[];
 }
 
 export interface AlphaStack {
@@ -265,6 +323,22 @@ export interface GuardianAction {
   ticker: string | null;
   text: string;
   suggested_stop?: number;
+  source?: 'PAPER' | 'LIVE';
+}
+
+export interface UpstoxStatus {
+  configured: boolean;
+  connected: boolean;
+  connectedAt: string | null;
+  note: string;
+}
+
+export interface LiveHolding {
+  ticker: string;
+  quantity: number;
+  avg_cost: number | null;
+  last_price: number | null;
+  pnl: number | null;
 }
 
 export interface GuardianReport {
@@ -561,17 +635,26 @@ export interface NewsArticle {
   published_at: string | null;
 }
 
+export interface NewsCatalyst {
+  type: string;
+  direction: 'positive' | 'negative' | 'neutral';
+}
+
 export interface NewsInsight {
   summary?: string;
   sentiment?: 'positive' | 'negative' | 'neutral' | 'mixed';
   key_points?: string[];
   watch_for?: string[];
+  catalysts?: NewsCatalyst[];
   error?: string;
 }
 
 export interface NewsResponse {
   ticker: string;
   fetched_new: number;
+  /** Why the Yahoo fetch produced nothing, when it did — shown instead of an
+   *  unexplained empty feed. */
+  fetch_error?: string | null;
   llm_enabled: boolean;
   articles: NewsArticle[];
   insight: { insight: NewsInsight; generated_at: string | null; cached: boolean }

@@ -13,10 +13,13 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { Router } from '@angular/router';
 import { debounceTime, distinctUntilChanged, filter, switchMap } from 'rxjs';
 import { toSignal } from '@angular/core/rxjs-interop';
 
-import { PaperAccount, PaperOrder, SymbolInfo } from '../../core/models/market-data.models';
+import {
+  LiveHolding, PaperAccount, PaperOrder, SymbolInfo, UpstoxStatus,
+} from '../../core/models/market-data.models';
 import { MarketDataService } from '../../core/services/market-data.service';
 
 @Component({
@@ -216,6 +219,88 @@ import { MarketDataService } from '../../core/services/market-data.service';
     } @else {
       <p class="muted">No orders yet.</p>
     }
+
+    <!-- ============ Upstox: real portfolio, read-only ============ -->
+    <mat-card appearance="outlined" class="upstox-card">
+      <div class="ux-head">
+        <h3>🔗 Upstox <span class="ro-badge">READ-ONLY</span></h3>
+        @if (upstox(); as u) {
+          @if (u.connected) {
+            <span class="muted">connected · real holdings feed the Guardian & morning brief</span>
+            <button mat-button (click)="disconnectUpstox()">Disconnect</button>
+          } @else if (u.configured) {
+            <span class="muted">{{ u.note }}</span>
+            <button mat-flat-button color="primary" (click)="connectUpstox()">
+              <mat-icon>link</mat-icon> Connect
+            </button>
+          } @else {
+            <span class="muted">Set UPSTOX_CLIENT_ID / UPSTOX_CLIENT_SECRET in .env
+              (see .env.example) and restart the backend</span>
+          }
+        }
+      </div>
+      @if (liveHoldings().length) {
+        <table mat-table [dataSource]="liveHoldings()" class="table live-table">
+          <ng-container matColumnDef="ticker">
+            <th mat-header-cell *matHeaderCellDef>Holding</th>
+            <td mat-cell *matCellDef="let h"><strong>{{ h.ticker }}</strong>
+              <span class="live-chip">LIVE</span></td>
+          </ng-container>
+          <ng-container matColumnDef="quantity">
+            <th mat-header-cell *matHeaderCellDef>Qty</th>
+            <td mat-cell *matCellDef="let h">{{ h.quantity }}</td>
+          </ng-container>
+          <ng-container matColumnDef="avg_cost">
+            <th mat-header-cell *matHeaderCellDef>Avg cost</th>
+            <td mat-cell *matCellDef="let h">₹{{ h.avg_cost | number: '1.2-2' }}</td>
+          </ng-container>
+          <ng-container matColumnDef="last_price">
+            <th mat-header-cell *matHeaderCellDef>Last</th>
+            <td mat-cell *matCellDef="let h">₹{{ h.last_price | number: '1.2-2' }}</td>
+          </ng-container>
+          <ng-container matColumnDef="pnl">
+            <th mat-header-cell *matHeaderCellDef>P&L</th>
+            <td mat-cell *matCellDef="let h" [class.up]="(h.pnl ?? 0) > 0"
+                [class.down]="(h.pnl ?? 0) < 0">₹{{ h.pnl | number: '1.0-0' }}</td>
+          </ng-container>
+          <ng-container matColumnDef="analyze">
+            <th mat-header-cell *matHeaderCellDef></th>
+            <td mat-cell *matCellDef="let h">
+              <button mat-stroked-button (click)="analyzeHolding(h.ticker)"
+                      matTooltip="Full Alpha Stack read: technical, quality, momentum, news, regime">
+                <mat-icon>query_stats</mat-icon> Analyze
+              </button>
+            </td>
+          </ng-container>
+          <tr mat-header-row *matHeaderRowDef="liveColumns"></tr>
+          <tr mat-row *matRowDef="let h; columns: liveColumns"></tr>
+        </table>
+      }
+    </mat-card>
+
+    <!-- ============ TradingView bridge setup ============ -->
+    <mat-card appearance="outlined" class="tv-card">
+      <div class="tv-head" (click)="tvOpen.set(!tvOpen())">
+        <h3>⚡ TradingView bridge</h3>
+        <span class="muted">alerts from your TradingView charts execute here</span>
+        <mat-icon class="tv-chevron" [class.open]="tvOpen()">expand_more</mat-icon>
+      </div>
+      @if (tvOpen()) {
+        <ol class="tv-steps">
+          <li>Set <code>TRADINGVIEW_WEBHOOK_SECRET=&lt;long random string&gt;</code> in
+            your <code>.env</code> and restart the backend.</li>
+          <li>Expose the backend to the internet (TradingView must reach it):
+            <code>ngrok http 8080</code> → copy the https URL.</li>
+          <li>In TradingView: create an alert → Notifications → <strong>Webhook URL</strong>:
+            <code>https://&lt;your-ngrok&gt;/api/v1/webhooks/tradingview</code></li>
+          <li>Alert <strong>Message</strong> (JSON — quantity optional, risk-sized from
+            stopPrice when omitted; SELL without quantity closes the position):
+            <pre>{{ tvSample }}</pre></li>
+        </ol>
+        <p class="muted">Fills are risk-checked, stop/target-attached and auto-journaled
+          with the alert note — same pipeline as manual trades.</p>
+      }
+    </mat-card>
   `,
   styles: `
     h2, h3 { font-weight: 500; }
@@ -241,11 +326,42 @@ import { MarketDataService } from '../../core/services/market-data.service';
     .down { color: #ef5350; }
     .muted { opacity: 0.6; font-size: 12px; }
     .spinner { display: flex; justify-content: center; padding: 16px; }
+
+    .upstox-card { padding: 14px 18px; margin-top: 8px; }
+    .ux-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .ux-head h3 { margin: 0; }
+    .ux-head .muted { flex: 1; }
+    .ro-badge { font-size: 9px; font-weight: 800; letter-spacing: 0.08em;
+                padding: 2px 8px; border-radius: 999px; vertical-align: middle;
+                background: rgba(38,166,154,0.15); color: var(--up); margin-left: 6px; }
+    .live-table { margin-top: 10px; }
+    .live-chip { font-size: 9px; font-weight: 800; letter-spacing: 0.06em;
+                 padding: 1px 7px; border-radius: 999px; margin-left: 8px;
+                 background: rgba(129,140,248,0.18); color: var(--accent-2); }
+
+    .tv-card { padding: 14px 18px; margin-top: 8px; }
+    .tv-head { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+    .tv-head h3 { margin: 0; }
+    .tv-chevron { margin-left: auto; transition: transform 0.25s ease; }
+    .tv-chevron.open { transform: rotate(180deg); }
+    .tv-steps { margin: 12px 0 6px; padding-left: 22px; font-size: 13px; line-height: 1.7; }
+    .tv-steps code, .tv-steps pre {
+      background: var(--card-border); border-radius: 6px; padding: 1px 6px;
+      font-family: 'JetBrains Mono', monospace; font-size: 11.5px;
+    }
+    .tv-steps pre { display: block; padding: 10px 12px; margin: 6px 0 0;
+                    white-space: pre-wrap; word-break: break-all; }
   `,
 })
 export class PortfolioPageComponent implements OnInit {
   private readonly api = inject(MarketDataService);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly router = inject(Router);
+
+  /** Deep-link a real holding into the Alpha Stack's five-layer analysis. */
+  analyzeHolding(ticker: string): void {
+    this.router.navigate(['/alpha'], { queryParams: { ticker } });
+  }
 
   readonly positionColumns = ['ticker', 'quantity', 'avgCost', 'lastPrice', 'marketValue',
                               'unrealizedPnl', 'riskPlan'];
@@ -260,6 +376,15 @@ export class PortfolioPageComponent implements OnInit {
   side: 'BUY' | 'SELL' = 'BUY';
   quantity = 1;
   autoExit = false;
+
+  readonly upstox = signal<UpstoxStatus | null>(null);
+  readonly liveHoldings = signal<LiveHolding[]>([]);
+  readonly liveColumns = ['ticker', 'quantity', 'avg_cost', 'last_price', 'pnl', 'analyze'];
+
+  readonly tvOpen = signal(false);
+  readonly tvSample = '{"token": "YOUR_SECRET", "ticker": "{{ticker}}", '
+    + '"action": "buy", "stopPrice": 2850.5, "targetPrice": 3100, '
+    + '"note": "{{strategy.order.comment}}"}';
 
   manage(): void {
     this.busy.set(true);
@@ -292,6 +417,36 @@ export class PortfolioPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.refresh();
+    this.refreshUpstox();
+  }
+
+  refreshUpstox(): void {
+    this.api.getUpstoxStatus().subscribe({
+      next: (s) => {
+        this.upstox.set(s);
+        if (s.connected) {
+          this.api.getUpstoxHoldings().subscribe({
+            next: (h) => this.liveHoldings.set(h),
+            error: () => this.liveHoldings.set([]),
+          });
+        } else {
+          this.liveHoldings.set([]);
+        }
+      },
+      error: () => this.upstox.set(null),   // card is additive — vanish quietly
+    });
+  }
+
+  connectUpstox(): void {
+    this.api.getUpstoxLoginUrl().subscribe({
+      next: (r) => { window.location.href = r.url; },
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Upstox not configured',
+                                         'Dismiss', { duration: 6000 }),
+    });
+  }
+
+  disconnectUpstox(): void {
+    this.api.disconnectUpstox().subscribe({ next: () => this.refreshUpstox() });
   }
 
   refresh(): void {

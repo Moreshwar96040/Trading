@@ -48,14 +48,18 @@ import { MarketDataService } from '../../core/services/market-data.service';
                    [style.animation-delay.ms]="i * 90">
                 <mat-icon>{{ icon(a) }}</mat-icon>
                 <span class="action-text">{{ a.text }}</span>
-                @if (a.kind === 'RAISE_STOP' && a.ticker && a.suggested_stop) {
+                @if (a.source === 'LIVE') {
+                  <span class="live-tag" matTooltip="Real Upstox holding — read-only: act in your broker app">LIVE</span>
+                }
+                @if (a.kind === 'RAISE_STOP' && a.ticker && a.suggested_stop && a.source !== 'LIVE') {
                   <button mat-stroked-button class="act-btn"
                           [disabled]="busy() === a.ticker"
                           (click)="raiseStop(a.ticker!, a.suggested_stop!)">
                     <mat-icon>arrow_upward</mat-icon> Raise stop
                   </button>
                 }
-                @if ((a.kind === 'EXIT_SIGNAL' || a.kind === 'STOP_BREACHED') && a.ticker) {
+                @if ((a.kind === 'EXIT_SIGNAL' || a.kind === 'STOP_BREACHED') && a.ticker
+                     && a.source !== 'LIVE') {
                   <button mat-stroked-button class="act-btn exit"
                           [disabled]="busy() === a.ticker"
                           (click)="exit(a.ticker!)">
@@ -110,6 +114,9 @@ import { MarketDataService } from '../../core/services/market-data.service';
     .act-btn { flex-shrink: 0; font-size: 12px; height: 32px; }
     .act-btn mat-icon { font-size: 15px; width: 15px; height: 15px; }
     .act-btn.exit { color: var(--down); border-color: rgba(239,83,80,0.4) !important; }
+    .live-tag { font-size: 9px; font-weight: 800; letter-spacing: 0.06em; cursor: help;
+                padding: 2px 7px; border-radius: 999px; flex-shrink: 0;
+                background: rgba(129,140,248,0.18); color: var(--accent-2); }
 
     .all-clear { display: flex; align-items: center; gap: 8px; color: var(--up);
                  font-size: 13px; margin: 14px 0 2px; }

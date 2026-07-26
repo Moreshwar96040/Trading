@@ -59,9 +59,17 @@ def _run_fundamentals_job() -> None:
 def _run_briefing_job() -> None:
     """Warm today's briefing before the open so it's cached when the app loads."""
     from app.services.briefing_service import build_briefing
+    from app.services.market_news_service import macro_digest, refresh_market_news
+    from app.services.news_sentiment_service import refresh_signal_news
     settings = get_settings()
     session = session_factory()()
     try:
+        news = refresh_market_news(session, settings)
+        log.info("Market news refreshed: +%d headlines", news["inserted"])
+        macro_digest(session, settings)     # warm the macro layer's cache too
+        signal_news = refresh_signal_news(session, settings)
+        log.info("Signal news refreshed: %d symbols, %d failures",
+                 signal_news["processed"], signal_news["failures"])
         result = build_briefing(session, settings, force=True)
         log.info("Morning briefing generated (narrative: %s)",
                  "yes" if result.get("narrative") else "disabled")

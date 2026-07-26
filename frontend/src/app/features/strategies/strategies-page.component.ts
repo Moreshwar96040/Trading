@@ -20,6 +20,7 @@ import {
   BacktestDetail, SignalInfo, StrategyDefinition, StrategyInfo, StrategyRule,
 } from '../../core/models/market-data.models';
 import { MarketDataService } from '../../core/services/market-data.service';
+import { EdgeGatesPanelComponent } from './edge-gates-panel.component';
 import { EquityChartComponent } from './equity-chart.component';
 import { RobustnessPanelComponent } from './robustness-panel.component';
 import { TradeSignalDialogComponent } from './trade-signal-dialog.component';
@@ -43,9 +44,12 @@ interface RuleDraft { left: string; op: string; right: string; }
             MatIconModule, MatFormFieldModule, MatInputModule, MatSelectModule,
             MatCheckboxModule, MatDatepickerModule, MatDialogModule, MatTableModule,
             MatProgressSpinnerModule, MatSnackBarModule, MatTooltipModule,
-            EquityChartComponent, RobustnessPanelComponent],
+            EdgeGatesPanelComponent, EquityChartComponent, RobustnessPanelComponent],
   providers: [provideNativeDateAdapter()],
   template: `
+    <!-- ============ the honest scoreboard ============ -->
+    <app-edge-gates-panel />
+
     <!-- ============ live signals ============ -->
     <mat-card appearance="outlined" class="signals-card">
       <div class="list-header">

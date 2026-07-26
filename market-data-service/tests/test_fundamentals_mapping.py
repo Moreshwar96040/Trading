@@ -9,7 +9,8 @@ INFO = {
     "forwardPE": 22.1,
     "priceToBook": 3.2,
     "priceToSalesTrailing12Months": 2.4,
-    "dividendYield": 0.0125,          # fraction → 1.25 %
+    "dividendYield": 1.25,            # current yfinance: already a percent
+    "trailingAnnualDividendYield": 0.0125,   # fraction → 1.25 % (preferred source)
     "returnOnEquity": 0.181,          # fraction → 18.1 %
     "debtToEquity": 41.5,             # percent number → 0.415 ratio
     "profitMargins": 0.09,
@@ -30,6 +31,21 @@ def test_map_ratios_happy_path():
     assert row["debt_to_equity"] == 0.415
     assert row["earnings_growth_pct"] == -5.0
     assert row["beta"] == 1.1
+
+
+def test_dividend_yield_is_not_double_scaled():
+    """Regression: yfinance switched dividendYield from fraction to percent.
+    Multiplying by 100 gave Bajaj Finance a 52% yield and Infosys 453%."""
+    # only the new-style percent field present
+    assert map_ratios({"dividendYield": 0.52})["dividend_yield_pct"] == 0.52
+    assert map_ratios({"dividendYield": 4.53})["dividend_yield_pct"] == 4.53
+    # the fraction field wins when both are present
+    assert map_ratios({"dividendYield": 0.52,
+                       "trailingAnnualDividendYield": 0.0052,
+                       })["dividend_yield_pct"] == 0.52
+    # non-payers and missing data stay None/zero rather than exploding
+    assert map_ratios({})["dividend_yield_pct"] is None
+    assert map_ratios({"dividendYield": 0.0})["dividend_yield_pct"] == 0.0
 
 
 def test_map_ratios_missing_and_garbage_keys():

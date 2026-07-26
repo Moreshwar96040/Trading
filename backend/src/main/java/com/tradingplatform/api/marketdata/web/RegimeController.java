@@ -1,6 +1,8 @@
 package com.tradingplatform.api.marketdata.web;
 
 import com.tradingplatform.api.integration.marketdata.MarketDataServiceClient;
+import com.tradingplatform.api.integration.upstox.UpstoxService;
+import java.util.List;
 import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -12,9 +14,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class RegimeController {
 
     private final MarketDataServiceClient marketData;
+    private final UpstoxService upstox;
 
-    public RegimeController(MarketDataServiceClient marketData) {
+    public RegimeController(MarketDataServiceClient marketData, UpstoxService upstox) {
         this.marketData = marketData;
+        this.upstox = upstox;
     }
 
     /** GET /api/v1/regime — breadth-based market regime. */
@@ -33,6 +37,18 @@ public class RegimeController {
     @GetMapping("/ai/usage")
     public Map<String, Object> aiUsage() {
         return marketData.getAiUsage();
+    }
+
+    /** GET /api/v1/data/health — freshness of every data source. */
+    @GetMapping("/data/health")
+    public Map<String, Object> dataHealth() {
+        return marketData.getDataHealth();
+    }
+
+    /** GET /api/v1/edge/gates — per-strategy validation pipeline. */
+    @GetMapping("/edge/gates")
+    public Map<String, Object> edgeGates() {
+        return marketData.getEdgeGates();
     }
 
     /** GET /api/v1/momentum/board — sector rotation heat + RS leaders. */
@@ -56,10 +72,14 @@ public class RegimeController {
         return marketData.getAlphaStack(ticker);
     }
 
-    /** GET /api/v1/portfolio/health — Position Guardian action queue. */
+    /** GET /api/v1/portfolio/health — Guardian action queue; when Upstox is
+     *  connected, real holdings join the checks (marked [LIVE]). */
     @GetMapping("/portfolio/health")
     public Map<String, Object> portfolioHealth() {
-        return marketData.getPortfolioHealth();
+        List<Map<String, Object>> live = upstox.livePositions();
+        return live.isEmpty()
+                ? marketData.getPortfolioHealth()
+                : marketData.getPortfolioHealthWithLive(live);
     }
 
     /** GET /api/v1/briefing — the morning AI briefing (cached per day). */

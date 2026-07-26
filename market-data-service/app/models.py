@@ -267,6 +267,20 @@ class NewsArticle(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class MarketNews(Base):
+    """Market-wide headlines from configured RSS feeds (WSJ/FT/aggregators)."""
+    __tablename__ = "market_news"
+    __table_args__ = (UniqueConstraint("dedup_key", name="uq_market_news"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(60), nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    link: Mapped[str | None] = mapped_column(String(1000))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    dedup_key: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
 class AiInsight(Base):
     """Cached LLM-generated insight per (symbol, kind). Regenerated when the
     fingerprint of its inputs changes (new articles / refreshed fundamentals).
@@ -278,6 +292,23 @@ class AiInsight(Base):
     content: Mapped[dict] = mapped_column(JSON, nullable=False)
     fingerprint: Mapped[str] = mapped_column(String(120), nullable=False)
     model_name: Mapped[str | None] = mapped_column(String(60))
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
+                                                          server_default=func.now())
+
+
+class NewsSentimentHistory(Base):
+    """One row per (symbol, day): the day's news sentiment, catalysts and
+    article count. Written pre-market by the briefing job so the Alpha Stack
+    news layer can read multi-day momentum, not just today's tone."""
+    __tablename__ = "news_sentiment_history"
+
+    symbol_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("symbols.id", ondelete="CASCADE"),
+                                           primary_key=True)
+    as_of_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    sentiment: Mapped[str | None] = mapped_column(String(10))
+    article_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    catalysts: Mapped[list | None] = mapped_column(JSON)
+    score: Mapped[float | None] = mapped_column(Numeric(6, 2))
     generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
                                                           server_default=func.now())
 
