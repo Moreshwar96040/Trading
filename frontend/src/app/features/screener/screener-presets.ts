@@ -47,6 +47,29 @@ export const SCREENER_PRESETS: ScreenerPreset[] = [
     conditions: [{ field: 'macd', op: 'gt', ref: 'macd_signal' }],
   },
 
+  // ---- Ichimoku ----------------------------------------------------------
+  // "Blue crossing red" is the Tenkan (9-period) crossing the Kijun (26-period).
+  // On its own that's just a momentum flip; combined with price clearing the
+  // cloud it's the classic Ichimoku breakout, which is what these screen for.
+  {
+    name: 'Ichimoku breakout (fresh TK cross)',
+    description: 'Blue (Tenkan) crossed above red (Kijun) in the last 3 days AND price broke out above the cloud',
+    conditions: [
+      { field: 'ichimoku_bullish', op: 'gte', value: 1 },
+      { field: 'tk_cross_age_days', op: 'lte', value: 3 },
+    ],
+  },
+  {
+    name: 'Ichimoku bullish (above cloud)',
+    description: 'Blue above red and price clear of the cloud — the trend is already established',
+    conditions: [{ field: 'ichimoku_bullish', op: 'gte', value: 1 }],
+  },
+  {
+    name: 'TK cross — blue over red',
+    description: 'Tenkan above Kijun, regardless of the cloud (earlier, weaker signal)',
+    conditions: [{ field: 'tenkan_9', op: 'gt', ref: 'kijun_26' }],
+  },
+
   // ---- Famous fundamental filters ---------------------------------------
   // Approximations of well-known published screens, expressed over the ratios
   // available on the snapshot. They are starting points, not exact reproductions

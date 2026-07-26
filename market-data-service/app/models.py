@@ -90,6 +90,15 @@ class ScreenerSnapshot(Base):
     return_1m_pct: Mapped[float | None] = mapped_column(Numeric(10, 4))
     return_3m_pct: Mapped[float | None] = mapped_column(Numeric(10, 4))
     return_1y_pct: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    # Ichimoku (V17): tenkan = blue line, kijun = red line, cloud = senkou A/B band.
+    # tk_cross_age_days is NULL unless tenkan is currently above kijun.
+    tenkan_9: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    kijun_26: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    cloud_top: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    cloud_bottom: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    tk_cross_age_days: Mapped[int | None] = mapped_column(Integer)
+    pct_above_cloud: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    ichimoku_bullish: Mapped[int | None] = mapped_column(Integer)
     # denormalized fundamentals (V4) — kept in sync by the snapshot refresher
     market_cap: Mapped[float | None] = mapped_column(Numeric(22, 2))
     pe_trailing: Mapped[float | None] = mapped_column(Numeric(12, 4))

@@ -111,3 +111,64 @@ def test_support_resistance_is_lagged_and_stepped():
     # peak at index 2 (value 5) confirmed 2 bars later -> resistance known from index 4 on
     assert pd.isna(sr["resistance"].iloc[3])
     assert sr["resistance"].iloc[6] == 5.0
+
+
+# ---------- Ichimoku screener fields (snapshot layer) ----------
+
+def _series(values):
+    close = pd.Series(values, dtype=float)
+    return close * 1.01, close * 0.99, close
+
+
+def _reversal(down_len=90, up_len=14):
+    """Long decline then a sharp turn — Tenkan (blue) crosses Kijun (red) late."""
+    import numpy as np
+    return np.concatenate([np.linspace(200, 100, down_len),
+                           np.linspace(100, 165, up_len)])
+
+
+def test_fresh_tk_cross_reports_a_small_age():
+    from app.services.snapshot_service import _ichimoku_fields
+    f = _ichimoku_fields(*_series(_reversal(down_len=90, up_len=14)))
+    assert f["tk_cross_age_days"] is not None
+    assert f["tk_cross_age_days"] <= 10          # the cross is recent, not stale
+
+
+def test_downtrend_has_no_bullish_cross_and_sits_below_cloud():
+    import numpy as np
+    from app.services.snapshot_service import _ichimoku_fields
+    f = _ichimoku_fields(*_series(np.linspace(300, 100, 140)))
+    assert f["tk_cross_age_days"] is None        # bearish: no live cross age
+    assert f["ichimoku_bullish"] == 0
+    assert f["pct_above_cloud"] < 0              # price under the cloud
+
+
+def test_bullish_flag_needs_both_cross_and_cloud_breakout():
+    from app.services.snapshot_service import _ichimoku_fields
+    f = _ichimoku_fields(*_series(_reversal(down_len=90, up_len=50)))
+    assert f["tenkan_9"] > f["kijun_26"]
+    assert f["pct_above_cloud"] > 0
+    assert f["ichimoku_bullish"] == 1
+
+
+def test_cloud_edges_are_ordered():
+    from app.services.snapshot_service import _ichimoku_fields
+    f = _ichimoku_fields(*_series(_reversal()))
+    assert f["cloud_top"] >= f["cloud_bottom"]
+
+
+def test_snapshot_row_exposes_ichimoku_fields():
+    """The screener DSL can only filter what the snapshot row carries."""
+    from datetime import date
+    import numpy as np
+    from app.services.snapshot_service import compute_snapshot_row
+    values = _reversal()
+    df = pd.DataFrame({
+        "trade_date": [date(2026, 1, 1)] * len(values),
+        "open": values, "high": values * 1.01, "low": values * 0.99,
+        "close": values, "volume": np.full(len(values), 1000),
+    })
+    row = compute_snapshot_row(df)
+    for field in ("tenkan_9", "kijun_26", "cloud_top", "cloud_bottom",
+                  "tk_cross_age_days", "pct_above_cloud", "ichimoku_bullish"):
+        assert field in row, field

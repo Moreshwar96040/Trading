@@ -55,6 +55,12 @@ export interface ScreenRow {
   return1mPct: number | null;
   return3mPct: number | null;
   return1yPct: number | null;
+  /** Ichimoku: bars since Tenkan (blue) crossed above Kijun (red) — null while
+   *  bearish. `ichimokuBullish` is 1 when that cross holds AND price has broken
+   *  out above the cloud. */
+  tkCrossAgeDays: number | null;
+  pctAboveCloud: number | null;
+  ichimokuBullish: number | null;
 }
 
 export interface ScreenerFieldsMeta {

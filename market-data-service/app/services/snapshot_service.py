@@ -24,8 +24,77 @@ TRADING_DAYS = {"1m": 21, "3m": 63, "1y": 252, "52w": 252}
 MIN_ROWS = 21   # below this we skip the symbol (indicators meaningless)
 
 
+#: How far back to look for a Tenkan/Kijun cross before calling it "not recent".
+TK_CROSS_LOOKBACK = 60
+
+
 def _pct(new: float, old: float) -> float | None:
     return round((new - old) / old * 100.0, 4) if old else None
+
+
+def _ichimoku_fields(high: pd.Series, low: pd.Series, close: pd.Series) -> dict:
+    """Ichimoku state for the screener, as plain numbers the DSL can filter.
+
+    The two lines people watch on the chart are Tenkan (blue, 9-period) and
+    Kijun (red, 26-period); the "TK cross" is Tenkan crossing Kijun. The cloud is
+    the band between Senkou A and B, already shifted forward in `core.ichimoku`,
+    so every value here is known at the current bar — no lookahead.
+
+    Exposed fields:
+      tenkan_9 / kijun_26     the two lines, so `tenkan_9 gt kijun_26` works
+      cloud_top / cloud_bottom  the band edges, for `close gt cloud_top`
+      tk_cross_age_days       bars since Tenkan crossed ABOVE Kijun (0 = today);
+                              NULL when Tenkan is below Kijun or no cross within
+                              the lookback — so `lte 3` means "fresh bullish cross"
+      pct_above_cloud         % of price above the cloud top (negative = in/below)
+      ichimoku_bullish        1 when Tenkan > Kijun AND price is clear of the cloud
+    """
+    ich = core.ichimoku(high, low, close)
+    tenkan, kijun = ich["tenkan"], ich["kijun"]
+    span_a, span_b = ich["senkou_a"], ich["senkou_b"]
+
+    def _last(series: pd.Series) -> float | None:
+        v = series.iloc[-1]
+        return None if pd.isna(v) else round(float(v), 6)
+
+    t_last, k_last = _last(tenkan), _last(kijun)
+    a_last, b_last = _last(span_a), _last(span_b)
+
+    cloud_top = cloud_bottom = None
+    if a_last is not None and b_last is not None:
+        cloud_top, cloud_bottom = max(a_last, b_last), min(a_last, b_last)
+
+    c = float(close.iloc[-1])
+    pct_above_cloud = _pct(c, cloud_top) if cloud_top is not None else None
+
+    # Bars since Tenkan most recently crossed above Kijun. Only meaningful while
+    # Tenkan is still above — a bearish state reports NULL rather than a stale age.
+    tk_cross_age = None
+    if t_last is not None and k_last is not None and t_last > k_last:
+        above = (tenkan > kijun).to_numpy()
+        valid = (~tenkan.isna() & ~kijun.isna()).to_numpy()
+        age = 0
+        for i in range(len(above) - 2, -1, -1):
+            if not valid[i]:
+                break
+            if not above[i]:                      # the bar before the cross
+                tk_cross_age = age
+                break
+            age += 1
+            if age > TK_CROSS_LOOKBACK:
+                break
+
+    bullish = int(bool(t_last is not None and k_last is not None and t_last > k_last
+                       and cloud_top is not None and c > cloud_top))
+    return {
+        "tenkan_9": t_last,
+        "kijun_26": k_last,
+        "cloud_top": cloud_top,
+        "cloud_bottom": cloud_bottom,
+        "tk_cross_age_days": tk_cross_age,
+        "pct_above_cloud": pct_above_cloud,
+        "ichimoku_bullish": bullish,
+    }
 
 
 def compute_snapshot_row(df: pd.DataFrame) -> dict | None:
@@ -52,6 +121,7 @@ def compute_snapshot_row(df: pd.DataFrame) -> dict | None:
         return _pct(c, float(close.iloc[-days - 1])) if len(close) > days else None
 
     return {
+        **_ichimoku_fields(high, low, close),
         "as_of_date": df["trade_date"].iloc[last],
         "close": round(c, 4),
         "change_1d_pct": _pct(c, prev_c),

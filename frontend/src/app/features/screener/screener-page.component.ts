@@ -98,6 +98,7 @@ interface ConditionDraft {
             <td mat-cell *matCellDef="let r"
                 [class.up]="col.signed && r[col.key] > 0"
                 [class.down]="col.signed && r[col.key] < 0">
+              <!-- A blank "TK age" means no live bullish cross (null), not zero. -->
               {{ col.numeric ? (r[col.key] | number: '1.0-2') : r[col.key] }}
             </td>
           </ng-container>
@@ -145,6 +146,10 @@ export class ScreenerPageComponent implements OnInit {
     { key: 'return1mPct', label: '1M %', numeric: true, signed: true },
     { key: 'return3mPct', label: '3M %', numeric: true, signed: true },
     { key: 'return1yPct', label: '1Y %', numeric: true, signed: true },
+    // Ichimoku: "TK age" = days since blue crossed above red (— when bearish),
+    // "Cloud %" = how far price sits above the cloud top.
+    { key: 'tkCrossAgeDays', label: 'TK age', numeric: true, signed: false },
+    { key: 'pctAboveCloud', label: 'Cloud %', numeric: true, signed: true },
   ] as const;
   readonly columnKeys = this.columns.map((c) => c.key);
 

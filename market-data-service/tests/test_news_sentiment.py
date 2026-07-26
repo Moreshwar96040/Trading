@@ -146,3 +146,14 @@ def test_news_layer_negative_today_vetoes(session: Session):
     layer = news_layer(session, sym.id)
     assert layer["veto"] is True
     assert layer["points"] < 0
+
+
+def test_velocity_counts_todays_articles_in_utc(session: Session):
+    """Regression: article timestamps are UTC but `date.today()` is local. In
+    IST that disagrees until 05:30, which used to zero out today's count."""
+    from datetime import datetime as _dt, timezone as _tz
+    sym = _sym(session)
+    just_now = _dt.now(_tz.utc)
+    for i in range(3):
+        _article(session, sym.id, just_now, f"u{i}")
+    assert news_velocity(session, sym.id)["count_today"] == 3

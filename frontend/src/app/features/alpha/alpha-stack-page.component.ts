@@ -125,23 +125,31 @@ import { StockNewsDialogComponent } from './stock-news-dialog.component';
                 </div>
                 <div class="layers">
                   @for (b of s.breakdown; track b.layer) {
-                    <div class="layer" [matTooltip]="layerTooltip(b)"
-                         [class.pos]="b.strength >= 0.6" [class.neg]="b.strength <= 0.4">
-                      <mat-icon>{{ layerIcon(b.layer) }}</mat-icon>
-                      <span>{{ b.points }}<span class="of-max">/{{ b.max }}</span></span>
-                    </div>
+                    <!-- News is the one clickable layer: its chip also carries the
+                         0-10 sentiment score and opens the headlines. Every other
+                         layer is a plain contribution pill. -->
+                    @if (b.layer === 'news') {
+                      <button type="button" class="layer news-layer"
+                              [class.pos]="b.strength >= 0.6" [class.neg]="b.strength <= 0.4"
+                              (click)="openNews(s)"
+                              [matTooltip]="layerTooltip(b) + ' · click to read headlines'">
+                        <mat-icon>newspaper</mat-icon>
+                        <span>{{ b.points }}<span class="of-max">/{{ b.max }}</span></span>
+                        @if (s.news_score !== null && s.news_score !== undefined) {
+                          <span class="news-10">{{ s.news_score | number: '1.1-1' }}/10</span>
+                        }
+                      </button>
+                    } @else {
+                      <div class="layer" [matTooltip]="layerTooltip(b)"
+                           [class.pos]="b.strength >= 0.6" [class.neg]="b.strength <= 0.4">
+                        <mat-icon>{{ layerIcon(b.layer) }}</mat-icon>
+                        <span>{{ b.points }}<span class="of-max">/{{ b.max }}</span></span>
+                      </div>
+                    }
                   }
                   @if (s.quality) {
                     <span class="grade" [matTooltip]="'Business quality ' + s.quality.score + '/100'">
                       grade {{ s.quality.grade }}</span>
-                  }
-                  @if (s.news_score !== null && s.news_score !== undefined) {
-                    <button type="button" class="news-score" [class]="'news-score ' + newsScoreClass(s.news_score)"
-                            (click)="openNews(s)"
-                            matTooltip="News sentiment score /10 — click to read the headlines">
-                      <mat-icon>newspaper</mat-icon>
-                      <span>{{ s.news_score | number: '1.1-1' }}/10</span>
-                    </button>
                   }
                 </div>
                 <p class="strategies">
@@ -233,17 +241,10 @@ import { StockNewsDialogComponent } from './stock-news-dialog.component';
     .layer.pos { color: var(--up); border-color: rgba(38,166,154,0.35); }
     .layer.neg { color: var(--down); border-color: rgba(239,83,80,0.35); }
     .grade { font-size: 11px; font-weight: 700; color: var(--accent-2); cursor: help; }
-    .news-score {
-      display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
-      font: 700 12px Inter, sans-serif; padding: 3px 9px; border-radius: 999px;
-      border: 1px solid var(--card-border); background: transparent; color: var(--text-dim);
-      transition: background 0.15s, color 0.15s;
-    }
-    .news-score:hover { background: rgba(128,128,128,0.12); }
-    .news-score mat-icon { font-size: 14px; width: 14px; height: 14px; }
-    .news-score.good { color: var(--up); border-color: rgba(38,166,154,0.4); }
-    .news-score.mid { color: #ffb74d; border-color: rgba(255,183,77,0.4); }
-    .news-score.bad { color: var(--down); border-color: rgba(239,83,80,0.4); }
+    /* News shares the .layer pill styling but is a clickable button. */
+    .news-layer { cursor: pointer; background: transparent; font-family: inherit; }
+    .news-layer:hover { background: rgba(128,128,128,0.12); }
+    .news-10 { font-weight: 700; opacity: 0.85; padding-left: 2px; }
     .strategies { font-size: 12px; color: var(--text-dim); margin: 2px 0 0; }
 
     .act { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
@@ -432,10 +433,6 @@ export class AlphaStackPageComponent implements OnInit {
 
   strategyNames(s: AlphaSetup): string {
     return s.strategies.map((st) => st.name).join(', ');
-  }
-
-  newsScoreClass(score: number): string {
-    return score >= 6.5 ? 'good' : score >= 4 ? 'mid' : 'bad';
   }
 
   openNews(s: AlphaSetup): void {

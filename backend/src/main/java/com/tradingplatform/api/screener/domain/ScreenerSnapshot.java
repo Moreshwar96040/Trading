@@ -95,6 +95,33 @@ public class ScreenerSnapshot {
     @Column(name = "return_1y_pct")
     private BigDecimal return1yPct;
 
+    // --- Ichimoku (V17), written by the Python snapshot refresher ---
+    // tenkan = the blue line, kijun = the red line; the cloud is the senkou A/B band.
+
+    @Column(name = "tenkan_9")
+    private BigDecimal tenkan9;
+
+    @Column(name = "kijun_26")
+    private BigDecimal kijun26;
+
+    @Column(name = "cloud_top")
+    private BigDecimal cloudTop;
+
+    @Column(name = "cloud_bottom")
+    private BigDecimal cloudBottom;
+
+    /** Bars since Tenkan crossed above Kijun; null while the pair is bearish.
+     *  BigDecimal like every other filterable column — the screener DSL compares
+     *  them uniformly through the Criteria API. */
+    @Column(name = "tk_cross_age_days")
+    private BigDecimal tkCrossAgeDays;
+
+    @Column(name = "pct_above_cloud")
+    private BigDecimal pctAboveCloud;
+
+    @Column(name = "ichimoku_bullish")
+    private BigDecimal ichimokuBullish;
+
     // --- fundamentals, denormalized by the Python snapshot refresher (V4) ---
 
     @Column(name = "market_cap")
@@ -150,6 +177,13 @@ public class ScreenerSnapshot {
     public BigDecimal getReturn1mPct() { return return1mPct; }
     public BigDecimal getReturn3mPct() { return return3mPct; }
     public BigDecimal getReturn1yPct() { return return1yPct; }
+    public BigDecimal getTenkan9() { return tenkan9; }
+    public BigDecimal getKijun26() { return kijun26; }
+    public BigDecimal getCloudTop() { return cloudTop; }
+    public BigDecimal getCloudBottom() { return cloudBottom; }
+    public BigDecimal getTkCrossAgeDays() { return tkCrossAgeDays; }
+    public BigDecimal getPctAboveCloud() { return pctAboveCloud; }
+    public BigDecimal getIchimokuBullish() { return ichimokuBullish; }
     public BigDecimal getMarketCap() { return marketCap; }
     public BigDecimal getPeTrailing() { return peTrailing; }
     public BigDecimal getPb() { return pb; }

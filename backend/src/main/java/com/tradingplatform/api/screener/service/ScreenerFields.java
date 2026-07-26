@@ -37,6 +37,16 @@ public final class ScreenerFields {
             Map.entry("return_1m_pct", "return1mPct"),
             Map.entry("return_3m_pct", "return3mPct"),
             Map.entry("return_1y_pct", "return1yPct"),
+            // Ichimoku (V17): tenkan = blue line, kijun = red line, cloud = senkou A/B.
+            // "Cloud breakout with a fresh TK cross" is expressible as
+            //   tk_cross_age_days lte 3  +  ichimoku_bullish gte 1
+            Map.entry("tenkan_9", "tenkan9"),
+            Map.entry("kijun_26", "kijun26"),
+            Map.entry("cloud_top", "cloudTop"),
+            Map.entry("cloud_bottom", "cloudBottom"),
+            Map.entry("tk_cross_age_days", "tkCrossAgeDays"),
+            Map.entry("pct_above_cloud", "pctAboveCloud"),
+            Map.entry("ichimoku_bullish", "ichimokuBullish"),
             // fundamentals (denormalized onto the snapshot in Phase 3)
             Map.entry("market_cap", "marketCap"),
             Map.entry("pe_trailing", "peTrailing"),

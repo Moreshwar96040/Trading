@@ -65,7 +65,11 @@ def news_velocity(session: Session, symbol_id: int) -> dict:
         select(NewsArticle.published_at, NewsArticle.fetched_at)
         .where(NewsArticle.symbol_id == symbol_id)).all()
 
-    today = date.today()
+    # Compare in UTC on both sides. Article timestamps are UTC; `date.today()` is
+    # the machine's local date, and in IST (UTC+5:30) those disagree between
+    # 00:00 and 05:30 every day — which silently reported zero articles today and
+    # killed the velocity signal each morning.
+    today = datetime.now(timezone.utc).date()
     prior_counts = 0
     count_today = 0
     for published_at, fetched_at in rows:
