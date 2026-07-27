@@ -12,6 +12,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTableModule } from '@angular/material/table';
+import { MatTabsModule } from '@angular/material/tabs';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { Router } from '@angular/router';
 import { debounceTime, distinctUntilChanged, filter, switchMap } from 'rxjs';
@@ -29,12 +30,27 @@ import { PortfolioAlphaMonitorComponent } from './portfolio-alpha-monitor.compon
   imports: [CommonModule, FormsModule, ReactiveFormsModule, MatCardModule, MatButtonModule,
             MatButtonToggleModule, MatCheckboxModule, MatFormFieldModule, MatInputModule,
             MatAutocompleteModule, MatIconModule, MatTableModule, MatProgressSpinnerModule,
-            MatSnackBarModule, MatTooltipModule, PortfolioAlphaMonitorComponent],
+            MatSnackBarModule, MatTabsModule, MatTooltipModule, PortfolioAlphaMonitorComponent],
   template: `
-    <app-portfolio-alpha-monitor />
+    <h2 class="page-title">Portfolio</h2>
+
+    <mat-tab-group class="pf-tabs" animationDuration="250ms" mat-stretch-tabs="false">
+
+      <!-- ============================ PAPER ============================ -->
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <mat-icon class="tab-ic">science</mat-icon> Paper trading
+          @if (account(); as a) { <span class="tab-count">{{ a.positions.length }}</span> }
+        </ng-template>
+        <div class="tab-body">
+
+    <app-portfolio-alpha-monitor source="PAPER" />
 
     <div class="header-row">
-      <h2>Paper Portfolio</h2>
+      <div class="head-note">
+        <mat-icon>science</mat-icon>
+        <span class="muted">Simulated account — practice and validate strategies with zero real risk.</span>
+      </div>
       <div class="header-actions">
         <mat-checkbox [(ngModel)]="autoExit"
                       matTooltip="When on, stop/target hits SELL automatically (paper only). When off, they raise alerts.">
@@ -223,25 +239,62 @@ import { PortfolioAlphaMonitorComponent } from './portfolio-alpha-monitor.compon
       <p class="muted">No orders yet.</p>
     }
 
-    <!-- ============ Upstox: real portfolio, read-only ============ -->
+    <!-- ============ TradingView bridge setup ============ -->
+    <mat-card appearance="outlined" class="tv-card">
+      <div class="tv-head" (click)="tvOpen.set(!tvOpen())">
+        <h3>⚡ TradingView bridge</h3>
+        <span class="muted">alerts from your TradingView charts execute here</span>
+        <mat-icon class="tv-chevron" [class.open]="tvOpen()">expand_more</mat-icon>
+      </div>
+      @if (tvOpen()) {
+        <ol class="tv-steps">
+          <li>Set <code>TRADINGVIEW_WEBHOOK_SECRET=&lt;long random string&gt;</code> in
+            your <code>.env</code> and restart the backend.</li>
+          <li>Expose the backend to the internet (TradingView must reach it):
+            <code>ngrok http 8080</code> → copy the https URL.</li>
+          <li>In TradingView: create an alert → Notifications → <strong>Webhook URL</strong>:
+            <code>https://&lt;your-ngrok&gt;/api/v1/webhooks/tradingview</code></li>
+          <li>Alert <strong>Message</strong> (JSON — quantity optional, risk-sized from
+            stopPrice when omitted; SELL without quantity closes the position):
+            <pre>{{ tvSample }}</pre></li>
+        </ol>
+        <p class="muted">Fills are risk-checked, stop/target-attached and auto-journaled
+          with the alert note — same pipeline as manual trades.</p>
+      }
+    </mat-card>
+
+        </div>
+      </mat-tab>
+
+      <!-- ============================ REAL (UPSTOX) ============================ -->
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <mat-icon class="tab-ic">account_balance_wallet</mat-icon> Real · Upstox
+          @if (liveHoldings().length) { <span class="tab-count">{{ liveHoldings().length }}</span> }
+        </ng-template>
+        <div class="tab-body">
+
+    <app-portfolio-alpha-monitor source="LIVE" />
+
     <mat-card appearance="outlined" class="upstox-card">
       <div class="ux-head">
-        <h3>🔗 Upstox <span class="ro-badge">READ-ONLY</span></h3>
+        <h3><mat-icon class="ux-ic">link</mat-icon> Upstox <span class="ro-badge">READ-ONLY</span></h3>
         @if (upstox(); as u) {
           @if (u.connected) {
-            <span class="muted">connected · real holdings feed the Guardian & morning brief</span>
-            <button mat-button (click)="disconnectUpstox()">Disconnect</button>
+            <span class="muted">Connected · real holdings feed the Guardian, Alpha Monitor and morning brief.</span>
+            <button mat-stroked-button (click)="disconnectUpstox()">Disconnect</button>
           } @else if (u.configured) {
             <span class="muted">{{ u.note }}</span>
             <button mat-flat-button color="primary" (click)="connectUpstox()">
-              <mat-icon>link</mat-icon> Connect
+              <mat-icon>link</mat-icon> Connect Upstox
             </button>
           } @else {
             <span class="muted">Set UPSTOX_CLIENT_ID / UPSTOX_CLIENT_SECRET in .env
-              (see .env.example) and restart the backend</span>
+              (see .env.example) and restart the backend.</span>
           }
         }
       </div>
+
       @if (liveHoldings().length) {
         <table mat-table [dataSource]="liveHoldings()" class="table live-table">
           <ng-container matColumnDef="ticker">
@@ -278,36 +331,42 @@ import { PortfolioAlphaMonitorComponent } from './portfolio-alpha-monitor.compon
           <tr mat-header-row *matHeaderRowDef="liveColumns"></tr>
           <tr mat-row *matRowDef="let h; columns: liveColumns"></tr>
         </table>
+      } @else if (upstox()?.connected) {
+        <p class="muted ux-empty">Connected, but no holdings returned — an empty demat,
+          or nothing has settled yet.</p>
+      } @else {
+        <div class="ux-pitch">
+          <mat-icon>insights</mat-icon>
+          <p>Connect Upstox to pull your real NSE holdings (read-only). They flow into the
+            Alpha Monitor above for live add/hold/trim/sell reads, the Guardian, and your
+            morning brief. No order or transfer permissions are ever requested.</p>
+        </div>
       }
     </mat-card>
 
-    <!-- ============ TradingView bridge setup ============ -->
-    <mat-card appearance="outlined" class="tv-card">
-      <div class="tv-head" (click)="tvOpen.set(!tvOpen())">
-        <h3>⚡ TradingView bridge</h3>
-        <span class="muted">alerts from your TradingView charts execute here</span>
-        <mat-icon class="tv-chevron" [class.open]="tvOpen()">expand_more</mat-icon>
-      </div>
-      @if (tvOpen()) {
-        <ol class="tv-steps">
-          <li>Set <code>TRADINGVIEW_WEBHOOK_SECRET=&lt;long random string&gt;</code> in
-            your <code>.env</code> and restart the backend.</li>
-          <li>Expose the backend to the internet (TradingView must reach it):
-            <code>ngrok http 8080</code> → copy the https URL.</li>
-          <li>In TradingView: create an alert → Notifications → <strong>Webhook URL</strong>:
-            <code>https://&lt;your-ngrok&gt;/api/v1/webhooks/tradingview</code></li>
-          <li>Alert <strong>Message</strong> (JSON — quantity optional, risk-sized from
-            stopPrice when omitted; SELL without quantity closes the position):
-            <pre>{{ tvSample }}</pre></li>
-        </ol>
-        <p class="muted">Fills are risk-checked, stop/target-attached and auto-journaled
-          with the alert note — same pipeline as manual trades.</p>
-      }
-    </mat-card>
+        </div>
+      </mat-tab>
+    </mat-tab-group>
   `,
   styles: `
     h2, h3 { font-weight: 500; }
-    .header-row { display: flex; justify-content: space-between; align-items: center; }
+    .page-title { margin: 0 0 14px; }
+
+    /* ---- tabbed shell: Paper vs Real, glass-themed ---- */
+    .pf-tabs { margin-top: 4px; }
+    .pf-tabs .tab-ic { font-size: 18px; width: 18px; height: 18px; margin-right: 7px;
+                       vertical-align: -4px; }
+    .tab-count { display: inline-flex; align-items: center; justify-content: center;
+                 min-width: 20px; height: 20px; padding: 0 6px; margin-left: 8px;
+                 border-radius: 999px; font-size: 11px; font-weight: 700;
+                 background: rgba(56,189,248,0.16); color: var(--accent); }
+    .tab-body { padding: 20px 2px 4px; }
+    .head-note { display: flex; align-items: center; gap: 8px; }
+    .head-note mat-icon { color: var(--accent); font-size: 20px; width: 20px; height: 20px; }
+    .head-note .muted { font-size: 13px; }
+
+    .header-row { display: flex; justify-content: space-between; align-items: center;
+                  gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
     .header-actions { display: flex; gap: 12px; align-items: center; }
     .manage-card { padding: 14px; margin-bottom: 16px; }
     .manage-row { display: flex; gap: 10px; align-items: baseline; padding: 4px 0; }
@@ -330,10 +389,17 @@ import { PortfolioAlphaMonitorComponent } from './portfolio-alpha-monitor.compon
     .muted { opacity: 0.6; font-size: 12px; }
     .spinner { display: flex; justify-content: center; padding: 16px; }
 
-    .upstox-card { padding: 14px 18px; margin-top: 8px; }
+    .upstox-card { padding: 16px 20px; }
     .ux-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .ux-head h3 { margin: 0; }
+    .ux-head h3 { margin: 0; display: inline-flex; align-items: center; gap: 6px; }
+    .ux-ic { font-size: 20px; width: 20px; height: 20px; color: var(--accent); }
     .ux-head .muted { flex: 1; }
+    .ux-empty { padding: 8px 0 2px; }
+    .ux-pitch { display: flex; gap: 14px; align-items: flex-start; padding: 12px 4px 4px; }
+    .ux-pitch mat-icon { color: var(--accent); font-size: 26px; width: 26px; height: 26px;
+                         flex-shrink: 0; }
+    .ux-pitch p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--text-dim);
+                  max-width: 640px; }
     .ro-badge { font-size: 9px; font-weight: 800; letter-spacing: 0.08em;
                 padding: 2px 8px; border-radius: 999px; vertical-align: middle;
                 background: rgba(38,166,154,0.15); color: var(--up); margin-left: 6px; }
