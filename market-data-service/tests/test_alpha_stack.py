@@ -10,7 +10,8 @@ from app.backtest.rules import (FUNDAMENTAL_FIELDS, combined_signal,
 from app.models import (AiInsight, AiPrediction, Fundamentals, ScreenerSnapshot,
                         Strategy, StrategySignal, Symbol)
 from app.services.conviction_service import (LAYER_WEIGHTS, POSTURE_CEILING,
-                                             TOTAL_WEIGHT, alpha_stack)
+                                             TOTAL_WEIGHT, _data_quality,
+                                             _volatility_factor, alpha_stack)
 
 
 # ---------- quality score ----------
@@ -193,6 +194,49 @@ def test_fundamentals_move_the_score_as_much_as_timing(session: Session):
     q_junk = next(b for b in setups["JUNKCO"]["breakdown"] if b["layer"] == "quality")
     # the quality layer alone must be able to swing most of its 25-point weight
     assert q_good["points"] - q_junk["points"] >= 15.0
+
+
+# ---------- risk-aware sizing ----------
+
+def test_volatility_factor_sizes_inversely_to_vol():
+    calm = _volatility_factor(1.0)      # very calm -> size up (clamped)
+    normal = _volatility_factor(2.5)    # baseline -> ~1.0
+    wild = _volatility_factor(6.0)      # volatile -> size down (clamped)
+    assert calm > normal > wild
+    assert 0.6 <= wild and calm <= 1.4          # clamped both ends
+    assert abs(normal - 1.0) < 0.01
+    assert _volatility_factor(None) == 1.0      # unknown vol never penalises
+
+
+def test_data_quality_haircuts_each_missing_input():
+    assert _data_quality(True, True) == (1.0, [])
+    f_one, miss_one = _data_quality(True, False)
+    assert f_one < 1.0 and miss_one == ["news"]
+    f_none, miss_none = _data_quality(False, False)
+    assert f_none < f_one                        # two gaps hurt more than one
+    assert set(miss_none) == {"fundamentals", "news"}
+
+
+def test_missing_data_sizes_smaller_than_complete(session: Session):
+    """Two identical setups; the one missing fundamentals+news must size down."""
+    complete = _seed_signal(session, "COMPLETE")
+    session.add(Fundamentals(symbol_id=complete.id, roe_pct=22, profit_margin_pct=15,
+                             earnings_growth_pct=15, revenue_growth_pct=12,
+                             debt_to_equity=0.3, pe_trailing=20))
+    session.add(AiInsight(symbol_id=complete.id, kind="NEWS",
+                          content={"sentiment": "positive"}, fingerprint="x"))
+    _seed_signal(session, "SPARSE")              # no fundamentals, no news
+    session.commit()
+    setups = {s["ticker"]: s for s in alpha_stack(session)["setups"]}
+    assert setups["SPARSE"]["data_quality"] < setups["COMPLETE"]["data_quality"]
+    assert setups["SPARSE"]["risk_multiplier"] <= setups["COMPLETE"]["risk_multiplier"]
+
+
+def test_sizing_exposes_factors_and_note(session: Session):
+    _seed_signal(session, "SZ")
+    s = alpha_stack(session, ticker="SZ")["setups"][0]
+    assert "vol_factor" in s and "data_quality" in s and s["size_note"]
+    assert s["risk_multiplier"] <= 1.5           # never exceeds the cap
 
 
 # ---------- analyze mode: any stock, signal or not ----------

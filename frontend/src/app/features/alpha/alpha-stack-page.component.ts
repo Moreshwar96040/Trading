@@ -169,7 +169,9 @@ import { StockNewsDialogComponent } from './stock-news-dialog.component';
 
               <!-- act -->
               <div class="act">
-                <span class="size-hint">{{ s.risk_multiplier }}× size</span>
+                <span class="size-hint" [matTooltip]="s.size_note || ''">{{ s.risk_multiplier }}× size
+                  @if (s.size_note) { <mat-icon class="size-info">info</mat-icon> }
+                </span>
                 <button mat-flat-button color="primary" [disabled]="s.risk_multiplier === 0"
                         (click)="trade(s)"
                         [matTooltip]="s.news_veto ? 'Blocked by negative news' :
@@ -322,7 +324,9 @@ import { StockNewsDialogComponent } from './stock-news-dialog.component';
     .strategies { font-size: 12px; color: var(--text-dim); margin: 2px 0 0; }
 
     .act { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
-    .size-hint { font-size: 11px; color: var(--text-dim); font-weight: 600; }
+    .size-hint { font-size: 11px; color: var(--text-dim); font-weight: 600;
+                 display: inline-flex; align-items: center; gap: 2px; cursor: help; }
+    .size-info { font-size: 12px; width: 12px; height: 12px; opacity: 0.6; }
 
     .empty { display: flex; gap: 16px; align-items: center; padding: 22px;
              color: var(--text-dim); }

@@ -82,6 +82,14 @@ public class RegimeController {
                 : marketData.getPortfolioHealthWithLive(live);
     }
 
+    /** GET /api/v1/portfolio/alpha-review — score each holding through the Alpha
+     *  Stack and recommend ADD / HOLD / TRIM / SELL. Live Upstox holdings included
+     *  when connected. Suggestions only — no orders are placed. */
+    @GetMapping("/portfolio/alpha-review")
+    public Map<String, Object> portfolioAlphaReview() {
+        return marketData.getPortfolioAlphaReview(upstox.livePositions());
+    }
+
     /** GET /api/v1/briefing — the morning AI briefing (cached per day). */
     @GetMapping("/briefing")
     public Map<String, Object> briefing(

@@ -81,6 +81,38 @@ def _risk_multiplier(conviction: float) -> float:
     return 0.0
 
 
+#: Volatility-scaled sizing. Two names at the same conviction shouldn't carry the
+#: same rupee risk if one is twice as volatile — a desk sizes inversely to vol.
+#: A "normal" NSE daily ATR is ~2.5% of price; calmer names size up, wilder names
+#: size down, clamped so the adjustment tilts sizing without dominating it.
+VOL_BASELINE_PCT = 2.5
+VOL_FACTOR_FLOOR, VOL_FACTOR_CAP = 0.6, 1.4
+#: Sizing haircut per missing high-signal input (fundamentals, news digest): a
+#: setup scored partly on unknowns should risk less, not the same as a fully-read one.
+DQ_PENALTY = 0.85
+#: Final sizing never exceeds the top conviction bucket's intent.
+RISK_MULT_CAP = 1.5
+
+
+def _volatility_factor(atr_pct: float | None) -> float:
+    """Inverse-vol sizing tilt: baseline / ATR%, clamped. 1.0 when vol unknown."""
+    if atr_pct is None or atr_pct <= 0:
+        return 1.0
+    return round(max(VOL_FACTOR_FLOOR, min(VOL_FACTOR_CAP, VOL_BASELINE_PCT / atr_pct)), 3)
+
+
+def _data_quality(has_fundamentals: bool, has_news: bool) -> tuple[float, list[str]]:
+    """Multiplicative sizing haircut for each absent high-signal input."""
+    factor, missing = 1.0, []
+    if not has_fundamentals:
+        factor *= DQ_PENALTY
+        missing.append("fundamentals")
+    if not has_news:
+        factor *= DQ_PENALTY
+        missing.append("news")
+    return round(factor, 3), missing
+
+
 def _technical_posture(snap: ScreenerSnapshot | None) -> tuple[float, str]:
     """Snapshot-based technical read for stocks with no fired signal (0..30)."""
     if snap is None or snap.close is None:
@@ -139,6 +171,9 @@ def _score_symbol(session: Session, *, symbol_id: int, ticker: str, name: str,
                   regime: dict, regime_code: str | None,
                   macro_sentiment: str | None = None) -> dict:
     breakdown: list[dict] = []
+    # Loaded once: powers the posture read (no-signal case) AND the ATR used for
+    # volatility-scaled sizing below.
+    snap = session.get(ScreenerSnapshot, symbol_id)
 
     # -- technical: fired signal(s) or snapshot posture --
     if sig_rows:
@@ -148,7 +183,6 @@ def _score_symbol(session: Session, *, symbol_id: int, ticker: str, name: str,
                       if len(sig_rows) > 1 else "ENTRY fired: ")
                      + ", ".join(r["strategy"] for r in sig_rows))
     else:
-        snap = session.get(ScreenerSnapshot, symbol_id)
         posture_points, tech_note = _technical_posture(snap)
         tech_strength = (posture_points / POSTURE_MAX) * POSTURE_CEILING
         if close is None and snap is not None and snap.close is not None:
@@ -210,13 +244,39 @@ def _score_symbol(session: Session, *, symbol_id: int, ticker: str, name: str,
            f"Market regime: {regime.get('label', 'unknown')}")
 
     conviction = max(0.0, min(100.0, sum(b["points"] for b in breakdown)))
-    mult = 0.0 if news_veto else _risk_multiplier(conviction)
+
+    # -- risk-aware sizing: conviction sets the base, then volatility and data
+    #    completeness tilt it. Conviction says "how sure"; these say "how much". --
+    atr_pct = None
+    if snap is not None and snap.atr_14 is not None \
+            and snap.close is not None and float(snap.close) > 0:
+        atr_pct = round(float(snap.atr_14) / float(snap.close) * 100.0, 2)
+    vol_factor = _volatility_factor(atr_pct)
+    data_quality, missing = _data_quality(fundamentals is not None, news_score is not None)
+
+    base_mult = _risk_multiplier(conviction)
+    mult = 0.0 if news_veto else round(
+        min(RISK_MULT_CAP, base_mult * vol_factor * data_quality), 2)
+
+    size_bits = [f"{base_mult:g}× base"]
+    if atr_pct is not None and vol_factor != 1.0:
+        size_bits.append(f"vol ×{vol_factor:g} (ATR {atr_pct:g}%"
+                         + (", calm" if vol_factor > 1 else ", volatile") + ")")
+    if missing:
+        size_bits.append(f"data ×{data_quality:g} (missing {', '.join(missing)})")
+    size_note = (" · ".join(size_bits) + f" → {mult:g}× size") if base_mult else \
+        "Conviction too low to size"
+
     return {
         "ticker": ticker, "name": name, "sector": sector, "close": close,
         "strategies": [{"id": r["strategy_id"], "name": r["strategy"]} for r in sig_rows],
         "has_live_signal": bool(sig_rows),
         "conviction": round(conviction),
         "risk_multiplier": mult,
+        "atr_pct": atr_pct,
+        "vol_factor": vol_factor,
+        "data_quality": data_quality,
+        "size_note": size_note,
         "news_veto": news_veto,
         "news_score": news_score,
         "quality": q,

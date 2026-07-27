@@ -21,6 +21,7 @@ import {
   LiveHolding, PaperAccount, PaperOrder, SymbolInfo, UpstoxStatus,
 } from '../../core/models/market-data.models';
 import { MarketDataService } from '../../core/services/market-data.service';
+import { PortfolioAlphaMonitorComponent } from './portfolio-alpha-monitor.component';
 
 @Component({
   selector: 'app-portfolio-page',
@@ -28,8 +29,10 @@ import { MarketDataService } from '../../core/services/market-data.service';
   imports: [CommonModule, FormsModule, ReactiveFormsModule, MatCardModule, MatButtonModule,
             MatButtonToggleModule, MatCheckboxModule, MatFormFieldModule, MatInputModule,
             MatAutocompleteModule, MatIconModule, MatTableModule, MatProgressSpinnerModule,
-            MatSnackBarModule, MatTooltipModule],
+            MatSnackBarModule, MatTooltipModule, PortfolioAlphaMonitorComponent],
   template: `
+    <app-portfolio-alpha-monitor />
+
     <div class="header-row">
       <h2>Paper Portfolio</h2>
       <div class="header-actions">

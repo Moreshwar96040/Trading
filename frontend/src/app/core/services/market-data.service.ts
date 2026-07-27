@@ -10,6 +10,7 @@ import {
   DataHealth, EdgeGatesReport,
   FundamentalsData, GuardianReport, IndicatorSeries, InsightResponse, JournalEntry,
   LeaksReport, LiveHolding, MarketNewsResponse, MomentumBoard, MorningBriefing,
+  PortfolioAlphaReview,
   NewsRefreshResult, NewsResponse, PaperAccount, PaperOrder, RegimeInfo,
   PositionSizeResult, Quote, RiskReport, RiskSettings, ScreenRequest, ScreenRow,
   ScreenerFieldsMeta, SignalInfo, StrategyDefinition, StrategyInfo, StrategyScore,
@@ -294,6 +295,10 @@ export class MarketDataService {
   getAlphaStack(ticker?: string): Observable<AlphaStack> {
     const params = ticker ? new HttpParams().set('ticker', ticker) : new HttpParams();
     return this.http.get<AlphaStack>(`${this.base}/alpha/stack`, { params });
+  }
+
+  getPortfolioAlphaReview(): Observable<PortfolioAlphaReview> {
+    return this.http.get<PortfolioAlphaReview>(`${this.base}/portfolio/alpha-review`);
   }
 
   getPortfolioHealth(): Observable<GuardianReport> {

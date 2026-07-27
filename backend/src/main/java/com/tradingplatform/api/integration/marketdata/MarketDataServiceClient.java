@@ -255,6 +255,20 @@ public class MarketDataServiceClient {
         }
     }
 
+    /** Alpha Monitor: score each held stock through the Alpha Stack and recommend
+     *  ADD / HOLD / TRIM / SELL. Live broker holdings ride in the body. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getPortfolioAlphaReview(List<Map<String, Object>> livePositions) {
+        try {
+            return http.post().uri("/internal/portfolio/alpha-review")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("live_positions", livePositions == null ? List.of() : livePositions))
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Alpha Monitor service unavailable", ex);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     public Map<String, Object> getBriefing(boolean force) {
         try {

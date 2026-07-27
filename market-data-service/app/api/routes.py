@@ -419,6 +419,18 @@ def portfolio_health_with_live(body: dict | None = None,
     return position_health(session, live_positions=body.get("live_positions"))
 
 
+@router.post("/internal/portfolio/alpha-review")
+def portfolio_alpha_review_endpoint(body: dict | None = None,
+                                    session: Session = Depends(get_session),
+                                    settings: Settings = Depends(get_settings)) -> dict:
+    """Alpha Monitor: score each held stock through the Alpha Stack and recommend
+    ADD / HOLD / TRIM / SELL. Body carries live broker holdings (same shape as the
+    Guardian): {"live_positions": [{"ticker","quantity","avg_cost","last_price"?}]}"""
+    from app.services.portfolio_monitor import portfolio_alpha_review
+    body = body or {}
+    return portfolio_alpha_review(session, settings, live_positions=body.get("live_positions"))
+
+
 @router.get("/internal/briefing")
 def briefing(force: bool = False,
              session: Session = Depends(get_session),

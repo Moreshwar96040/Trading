@@ -302,6 +302,12 @@ export interface AlphaSetup {
   has_live_signal?: boolean;
   conviction: number;
   risk_multiplier: number;
+  /** Sizing detail: base multiplier tilted by volatility (inverse-ATR) and a
+   *  data-completeness haircut. `size_note` explains the arithmetic. */
+  atr_pct?: number | null;
+  vol_factor?: number;
+  data_quality?: number;
+  size_note?: string;
   news_veto: boolean;
   news_score: number | null;
   quality: QualityScore | null;
@@ -358,6 +364,32 @@ export interface GuardianReport {
   actions?: GuardianAction[];
   summary?: { open_positions: number; portfolio_value: number; equity: number;
               high_priority: number };
+}
+
+export interface HoldingReview {
+  ticker: string;
+  name: string;
+  sector: string | null;
+  quantity: number;
+  avg_cost: number;
+  source: 'LIVE' | 'PAPER';
+  close: number | null;
+  conviction: number | null;
+  verdict?: 'HIGH' | 'NORMAL' | 'SMALL' | 'STAND_ASIDE' | 'VETOED';
+  news_veto?: boolean;
+  news_score?: number | null;
+  trend?: 'improving' | 'deteriorating' | 'stable' | null;
+  action: 'ADD' | 'HOLD' | 'TRIM' | 'SELL' | 'UNKNOWN';
+  rationale: string;
+  pnl_pct: number | null;
+}
+
+export interface PortfolioAlphaReview {
+  status: 'OK' | 'NO_POSITIONS';
+  note?: string;
+  reviews?: HoldingReview[];
+  summary?: { holdings: number; sell: number; trim: number; hold: number; add: number;
+              action_needed: number };
 }
 
 export interface MorningBriefing {
