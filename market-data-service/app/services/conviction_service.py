@@ -94,6 +94,94 @@ DQ_PENALTY = 0.85
 RISK_MULT_CAP = 1.5
 
 
+#: --- Confidence: how SURE we are, as distinct from how GOOD the setup looks ---
+#: Conviction and confidence answer different questions and must not be one number.
+#: An 80/0.4 setup (great-looking, poorly evidenced) and a 60/0.9 setup (modest,
+#: well evidenced) demand different sizing, and the old single score could not
+#: express the difference.
+#: Weighted dispersion at or above this counts as total disagreement.
+DISPERSION_MAX = 0.35
+#: A high-weight layer this far from the weighted mean, on the opposite side, is a conflict.
+CONFLICT_THRESHOLD = 0.30
+CONFLICT_MIN_WEIGHT = 14.0
+#: Regime support: labelled history for the CURRENT regime, shrunk n/(n+k).
+#: Makes the system automatically cautious in regimes it has barely seen.
+REGIME_SUPPORT_K = 200
+#: Confidence never reaches zero — zeroing is the veto's job, not uncertainty's.
+CONFIDENCE_FLOOR = 0.15
+
+
+def _consensus(breakdown: list[dict]) -> tuple[float, float]:
+    """(consensus, dispersion) from the weighted spread of layer strengths.
+
+    Conviction is a weighted mean, and a mean hides whether it came from
+    agreement or from a fight. Two setups can both score 60: one where every
+    layer says 0.6, another where half say 0.95 and half say 0.25. The second is
+    far less trustworthy, and only dispersion reveals that.
+    """
+    pairs = [(b["strength"], LAYER_WEIGHTS[b["layer"]]) for b in breakdown
+             if b.get("strength") is not None]
+    total_w = sum(w for _, w in pairs)
+    if not pairs or total_w <= 0:
+        return 1.0, 0.0
+    mean = sum(s * w for s, w in pairs) / total_w
+    variance = sum(w * (s - mean) ** 2 for s, w in pairs) / total_w
+    dispersion = variance ** 0.5
+    consensus = max(0.0, 1.0 - min(1.0, dispersion / DISPERSION_MAX))
+    return round(consensus, 3), round(dispersion, 4)
+
+
+def _conflicts(breakdown: list[dict]) -> list[dict]:
+    """High-weight layers pulling hard against the consensus.
+
+    Surfaced as a first-class output, not a footnote: "fundamentals strong but
+    news deteriorating" is a quality-trap warning a trader can act on, and it is
+    invisible in a single blended score.
+    """
+    pairs = [(b, LAYER_WEIGHTS[b["layer"]]) for b in breakdown
+             if b.get("strength") is not None]
+    total_w = sum(w for _, w in pairs)
+    if not pairs or total_w <= 0:
+        return []
+    mean = sum(b["strength"] * w for b, w in pairs) / total_w
+
+    bulls = [b for b, w in pairs
+             if w >= CONFLICT_MIN_WEIGHT and b["strength"] - mean >= CONFLICT_THRESHOLD]
+    bears = [b for b, w in pairs
+             if w >= CONFLICT_MIN_WEIGHT and mean - b["strength"] >= CONFLICT_THRESHOLD]
+    if not bulls or not bears:
+        return []                          # a one-sided outlier is not a conflict
+    bull = max(bulls, key=lambda b: b["strength"])
+    bear = min(bears, key=lambda b: b["strength"])
+    return [{"bullish_layer": bull["layer"], "bullish_strength": bull["strength"],
+             "bearish_layer": bear["layer"], "bearish_strength": bear["strength"],
+             "note": (f"{bull['layer']} is strong ({bull['strength']:.2f}) while "
+                      f"{bear['layer']} is weak ({bear['strength']:.2f}) — "
+                      "the layers disagree")}]
+
+
+def _regime_support(session: Session, regime_code: str | None) -> float:
+    """How much labelled history backs scoring in the CURRENT regime.
+
+    Shrinkage n/(n+k): with little history the term is small, confidence drops,
+    and positions shrink automatically. The system is cautious exactly where it
+    is ignorant — which is the whole point of separating confidence out.
+    """
+    if not regime_code:
+        return 0.5
+    try:
+        from sqlalchemy import func as sqlfunc
+
+        from app.models import ConvictionHistory
+        n = session.scalar(
+            select(sqlfunc.count()).select_from(ConvictionHistory)
+            .where(ConvictionHistory.regime_code == regime_code,
+                   ConvictionHistory.fwd_return_10d.isnot(None))) or 0
+    except Exception:                      # noqa: BLE001 — table may not exist yet
+        return 0.5
+    return round(n / (n + REGIME_SUPPORT_K), 3)
+
+
 def _volatility_factor(atr_pct: float | None) -> float:
     """Inverse-vol sizing tilt: baseline / ATR%, clamped. 1.0 when vol unknown."""
     if atr_pct is None or atr_pct <= 0:
@@ -254,16 +342,32 @@ def _score_symbol(session: Session, *, symbol_id: int, ticker: str, name: str,
     vol_factor = _volatility_factor(atr_pct)
     data_quality, missing = _data_quality(fundamentals is not None, news_score is not None)
 
+    # -- confidence: how sure we are of the conviction estimate --
+    consensus, dispersion = _consensus(breakdown)
+    conflicts = _conflicts(breakdown)
+    regime_support = _regime_support(session, regime_code)
+    # estimate_precision is 1.0 until the learner supplies weight confidence
+    # intervals (Module H) — kept explicit so it is a known gap, not a hidden one.
+    estimate_precision = 1.0
+    confidence = round(max(CONFIDENCE_FLOOR,
+                           data_quality * consensus * regime_support
+                           * estimate_precision), 3)
+
     base_mult = _risk_multiplier(conviction)
+    # Confidence replaces the old bare data-quality haircut: completeness is now
+    # one of four terms rather than the only one that mattered.
     mult = 0.0 if news_veto else round(
-        min(RISK_MULT_CAP, base_mult * vol_factor * data_quality), 2)
+        min(RISK_MULT_CAP, base_mult * vol_factor * confidence), 2)
 
     size_bits = [f"{base_mult:g}× base"]
     if atr_pct is not None and vol_factor != 1.0:
         size_bits.append(f"vol ×{vol_factor:g} (ATR {atr_pct:g}%"
                          + (", calm" if vol_factor > 1 else ", volatile") + ")")
+    size_bits.append(f"confidence ×{confidence:g}")
     if missing:
-        size_bits.append(f"data ×{data_quality:g} (missing {', '.join(missing)})")
+        size_bits.append(f"missing {', '.join(missing)}")
+    if consensus < 0.6:
+        size_bits.append(f"layers disagree (consensus {consensus:g})")
     size_note = (" · ".join(size_bits) + f" → {mult:g}× size") if base_mult else \
         "Conviction too low to size"
 
@@ -272,6 +376,13 @@ def _score_symbol(session: Session, *, symbol_id: int, ticker: str, name: str,
         "strategies": [{"id": r["strategy_id"], "name": r["strategy"]} for r in sig_rows],
         "has_live_signal": bool(sig_rows),
         "conviction": round(conviction),
+        # Conviction says how good; confidence says how sure. Kept separate on
+        # purpose — see docs/ADAPTIVE_PLATFORM_DESIGN.md §1.1.
+        "confidence": confidence,
+        "consensus": consensus,
+        "dispersion": dispersion,
+        "conflicts": conflicts,
+        "regime_support": regime_support,
         "risk_multiplier": mult,
         "atr_pct": atr_pct,
         "vol_factor": vol_factor,
@@ -355,6 +466,12 @@ def alpha_stack(session: Session, ticker: str | None = None,
                                 name=sym.name, sector=sym.sector, close=None,
                                 sig_rows=[], regime=regime, regime_code=regime_code,
                                 macro_sentiment=macro_sentiment)]
+
+    # Attach the deterministic rationale. Pure and cheap — every setup gets an
+    # explanation derived from its own arithmetic, with no LLM on this path.
+    from app.ai.reasoning import build_rationale
+    for setup in setups:
+        setup["rationale"] = build_rationale(setup).to_dict()
 
     setups.sort(key=lambda s: s["conviction"], reverse=True)
     return {"status": "OK" if setups else "NO_SIGNALS",

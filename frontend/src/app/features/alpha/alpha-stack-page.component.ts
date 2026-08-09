@@ -117,6 +117,13 @@ import { StockNewsDialogComponent } from './stock-news-dialog.component';
                 <span class="verdict-tag" [class]="'verdict-tag ' + s.verdict.toLowerCase()">
                   {{ s.verdict === 'VETOED' ? 'NEWS VETO' : s.verdict.replace('_', ' ') }}
                 </span>
+                @if (s.confidence !== undefined) {
+                  <span class="conf" [class]="'conf ' + confClass(s.confidence)"
+                        matTooltip="Confidence — how sure we are of this score.
+                                    Conviction ranks; confidence sizes.">
+                    conf {{ s.confidence | number: '1.2-2' }}
+                  </span>
+                }
               </div>
 
               <!-- identity + layers -->
@@ -155,6 +162,12 @@ import { StockNewsDialogComponent } from './stock-news-dialog.component';
                       grade {{ s.quality.grade }}</span>
                   }
                 </div>
+                @if (s.rationale; as r) {
+                  <p class="headline">{{ r.headline }}</p>
+                  @for (c of r.conflicts; track c) {
+                    <p class="conflict"><mat-icon>warning_amber</mat-icon>{{ c }}</p>
+                  }
+                }
                 <p class="strategies">
                   @if (s.strategies.length) { via {{ strategyNames(s) }} }
                   @else { snapshot posture read — no live signal fired }
@@ -197,8 +210,26 @@ import { StockNewsDialogComponent } from './stock-news-dialog.component';
                     </div>
                     <p class="bd-note">{{ b.note }}</p>
                   }
+                  @if (s.rationale; as r) {
+                    <div class="rat">
+                      @if (r.action_hint) { <p class="hint">{{ r.action_hint }}</p> }
+                      @if (r.drivers.length) {
+                        <p><b class="good">Driving it:</b> {{ r.drivers.join(' · ') }}</p>
+                      }
+                      @if (r.detractors.length) {
+                        <p><b class="bad">Holding it back:</b> {{ r.detractors.join(' · ') }}</p>
+                      }
+                      @if (r.confidence_notes.length) {
+                        <p><b>Confidence limited by:</b> {{ r.confidence_notes.join(' · ') }}</p>
+                      }
+                      @if (r.veto_reason) {
+                        <p><b class="bad">Veto:</b> {{ r.veto_reason }}</p>
+                      }
+                    </div>
+                  }
                   <p class="detail-foot">Conviction is the weighted sum of these layers,
-                    out of 100. Negative news vetoes sizing regardless of the total.</p>
+                    out of 100. Confidence (how sure) is separate and scales size.
+                    Negative news vetoes sizing regardless of the total.</p>
                 </div>
               }
             </mat-card>
@@ -278,6 +309,22 @@ import { StockNewsDialogComponent } from './stock-news-dialog.component';
     .bd-note { margin: 2px 0 2px 26px; font-size: 11.5px; color: var(--text-dim);
                line-height: 1.4; }
     .detail-foot { margin-top: 12px; font-size: 11px; color: var(--text-dim); opacity: 0.75; }
+    .conf { font-size: 9px; font-weight: 800; letter-spacing: 0.06em; padding: 2px 7px;
+            border-radius: 999px; }
+    .conf.hi { background: rgba(38,166,154,0.15); color: var(--up); }
+    .conf.mid { background: rgba(255,183,77,0.15); color: #ffb74d; }
+    .conf.lo { background: rgba(239,83,80,0.15); color: var(--down); }
+    .headline { margin: 6px 0 2px; font-size: 12.5px; color: var(--mat-sys-on-surface);
+                line-height: 1.45; }
+    .conflict { display: flex; align-items: flex-start; gap: 5px; margin: 4px 0 0;
+                font-size: 12px; color: #ffb74d; line-height: 1.4; }
+    .conflict mat-icon { font-size: 15px; width: 15px; height: 15px; margin-top: 1px;
+                         flex-shrink: 0; }
+    .rat { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--card-border); }
+    .rat p { margin: 4px 0; font-size: 12px; color: var(--text-dim); line-height: 1.45; }
+    .rat .hint { color: var(--mat-sys-on-surface); font-weight: 500; }
+    .rat .good { color: var(--up); }
+    .rat .bad { color: var(--down); }
 
     .meter-zone { display: flex; flex-direction: column; align-items: center; gap: 4px;
                   flex-shrink: 0; }
@@ -507,6 +554,11 @@ export class AlphaStackPageComponent implements OnInit {
                     ml: 'ML vote', macro: 'Market-wide news', regime: 'Market regime',
                   }[b.layer] ?? b.layer;
     return `${label} — ${b.points} of ${b.max} points\n${b.note}`;
+  }
+
+  /** Confidence banding — deliberately strict: 0.7+ is "well evidenced". */
+  confClass(confidence: number): string {
+    return confidence >= 0.7 ? 'hi' : confidence >= 0.45 ? 'mid' : 'lo';
   }
 
   layerIcon(layer: string): string {
