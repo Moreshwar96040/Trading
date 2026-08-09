@@ -247,6 +247,48 @@ class Alert(Base):
     triggered_value: Mapped[float | None] = mapped_column(Numeric(18, 4))
 
 
+class ModelVersion(Base):
+    """A versioned decision artefact — weights, an ML model, thresholds (V22).
+
+    Exactly one CHAMPION per kind (enforced by a partial unique index). Without
+    this, applying a learned weight suggestion silently destroys the ability to
+    attribute a change in results to a change in the model.
+    """
+    __tablename__ = "model_versions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    label: Mapped[str] = mapped_column(String(80), nullable=False)
+    params_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    metrics_json: Mapped[dict | None] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(10), default="SHADOW")
+    parent_id: Mapped[int | None] = mapped_column(BigInteger,
+                                                  ForeignKey("model_versions.id"))
+    notes: Mapped[str | None] = mapped_column(String(500))
+    created_by: Mapped[str] = mapped_column(String(60), default="system")
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
+                                                        server_default=func.now())
+    promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    promoted_by: Mapped[str | None] = mapped_column(String(60))
+
+
+class ModelVersionAudit(Base):
+    """Append-only record of every status change — who promoted what, and why."""
+    __tablename__ = "model_version_audit"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    version_id: Mapped[int] = mapped_column(BigInteger,
+                                            ForeignKey("model_versions.id",
+                                                       ondelete="CASCADE"),
+                                            nullable=False)
+    from_status: Mapped[str | None] = mapped_column(String(10))
+    to_status: Mapped[str] = mapped_column(String(10), nullable=False)
+    actor: Mapped[str] = mapped_column(String(60), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(300))
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
+                                                         server_default=func.now())
+
+
 class ScreenerSnapshotHistory(Base):
     """Append-only indicator history (V21) — the point-in-time source of truth.
 
@@ -345,6 +387,11 @@ class ConvictionHistory(Base):
 
     recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
                                                          server_default=func.now())
+    #: Which model produced this score (V22). Without it, attribution breaks the
+    #: first time weights change — you could no longer tell whether results moved
+    #: because the market did or because the model did.
+    model_version_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("model_versions.id"))
 
 
 class AutopilotTrade(Base):
@@ -390,6 +437,8 @@ class AutopilotTrade(Base):
 
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
                                                         server_default=func.now())
+    model_version_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("model_versions.id"))
 
 
 class AiPrediction(Base):

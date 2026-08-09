@@ -87,11 +87,32 @@ def test_disabled_by_default_does_nothing(session: Session):
     assert session.query(AutopilotTrade).count() == 0
 
 
+def _fresh_prices(session: Session) -> None:
+    """A current price bar, so the data-freshness breaker doesn't (correctly) halt."""
+    from datetime import date
+
+    from app.models import OhlcvDaily, Symbol
+    sym = Symbol(ticker="FRESH", yahoo_symbol="FRESH.NS", name="Fresh",
+                 exchange="NSE", active=True)
+    session.add(sym)
+    session.flush()
+    session.add(OhlcvDaily(symbol_id=sym.id, trade_date=date.today(),
+                           open=1, high=1, low=1, close=1, volume=1))
+    session.commit()
+
+
 def test_enabled_but_no_setups_is_a_clean_noop(session: Session):
     from app.services.autopilot import run_autopilot
+    _fresh_prices(session)
     out = run_autopilot(session, _Settings())
     assert out["status"] in {"NO_SETUPS", "OK"}
     assert out.get("opened", 0) == 0
+
+
+def test_an_empty_database_halts_rather_than_trading_blind(session: Session):
+    """No prices at all is not 'nothing to do' — it is a reason to stop."""
+    from app.services.autopilot import run_autopilot
+    assert run_autopilot(session, _Settings())["status"] == "HALTED"
 
 
 def test_order_placement_is_injected_so_tests_never_hit_a_broker(session: Session):

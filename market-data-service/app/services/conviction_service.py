@@ -36,6 +36,8 @@ from sqlalchemy.orm import Session
 
 from app.ai.quality_score import quality_score
 from app.models import (AiPrediction, Fundamentals, ScreenerSnapshot, Symbol)
+from app.scoring import ScoringInputs, WeightSet
+from app.scoring import score as score_setup
 
 log = logging.getLogger(__name__)
 
@@ -257,146 +259,92 @@ def _layer(breakdown: list[dict], layer: str, strength: float, note: str,
 def _score_symbol(session: Session, *, symbol_id: int, ticker: str, name: str,
                   sector: str | None, close: float | None, sig_rows: list,
                   regime: dict, regime_code: str | None,
-                  macro_sentiment: str | None = None) -> dict:
-    breakdown: list[dict] = []
-    # Loaded once: powers the posture read (no-signal case) AND the ATR used for
-    # volatility-scaled sizing below.
+                  macro_sentiment: str | None = None,
+                  weights: WeightSet | None = None) -> dict:
+    """Resolve this symbol's inputs from the DB, then delegate to the pure engine.
+
+    All the I/O lives here; none of it lives in the scoring maths. That split is
+    what lets the same inputs be re-scored under a challenger weight set, or
+    replayed from history, without a live database.
+    """
     snap = session.get(ScreenerSnapshot, symbol_id)
 
-    # -- technical: fired signal(s) or snapshot posture --
-    if sig_rows:
-        extra = min(len(sig_rows) - 1, 2)
-        tech_strength = SIGNAL_STRENGTH + extra * EXTRA_STRATEGY
-        tech_note = ((f"{len(sig_rows)} strategies agree: "
-                      if len(sig_rows) > 1 else "ENTRY fired: ")
-                     + ", ".join(r["strategy"] for r in sig_rows))
-    else:
-        posture_points, tech_note = _technical_posture(snap)
-        tech_strength = (posture_points / POSTURE_MAX) * POSTURE_CEILING
+    # -- technical: posture is only needed when no signal fired --
+    posture_points, posture_note = (0.0, "")
+    if not sig_rows:
+        posture_points, posture_note = _technical_posture(snap)
         if close is None and snap is not None and snap.close is not None:
             close = float(snap.close)
-    _layer(breakdown, "technical", tech_strength, tech_note)
 
-    # -- fundamental quality: weighted equal to timing --
+    # -- quality --
+    quality = None
     fundamentals = session.get(Fundamentals, symbol_id)
     if fundamentals is not None:
-        q = quality_score({c.name: (float(getattr(fundamentals, c.name))
-                                    if getattr(fundamentals, c.name) is not None else None)
-                           for c in Fundamentals.__table__.columns
-                           if c.name not in ("symbol_id", "computed_at")})
-        _layer(breakdown, "quality", q["score"] / 100.0,
-               f"Business quality {q['score']}/100 (grade {q['grade']})")
-    else:
-        q = None
-        _layer(breakdown, "quality", NEUTRAL,
-               "No fundamentals stored — neutral (refresh them for a real read)")
+        quality = quality_score({c.name: (float(getattr(fundamentals, c.name))
+                                          if getattr(fundamentals, c.name) is not None
+                                          else None)
+                                 for c in Fundamentals.__table__.columns
+                                 if c.name not in ("symbol_id", "computed_at")})
 
-    # -- news sentiment gate: composite of tone + catalysts + velocity + trend --
+    # -- news (composite: tone + catalysts + velocity + trend, plus the veto) --
     from app.services.news_sentiment_service import news_layer
     news = news_layer(session, symbol_id)
-    sentiment = news["sentiment"]
-    news_veto = news["veto"]
-    news_score = news.get("score_out_of_10")
-    _layer(breakdown, "news",
-           NEUTRAL if news_score is None else news_score / 10.0,
-           news["note"], score_out_of_10=news_score)
 
-    # -- momentum: relative strength vs the universe (leaders lead) --
+    # -- momentum --
     from app.services.momentum_service import rs_rank_for_symbol
     rs = rs_rank_for_symbol(session, symbol_id)
-    _layer(breakdown, "momentum", NEUTRAL if rs is None else rs / 100.0,
-           (f"Relative strength {rs:.0f}/100 vs the universe"
-            + (" — a leader" if rs >= 80 else " — a laggard" if rs <= 20 else "")
-            if rs is not None else "Not enough universe data for an RS rank"))
 
-    # -- ML vote --
+    # -- ml --
     pred = session.get(AiPrediction, symbol_id)
-    ml_strength, ml_voted = NEUTRAL, False
-    if pred is not None and pred.test_direction_accuracy is not None \
-            and float(pred.test_direction_accuracy) >= MIN_ML_ACCURACY \
-            and pred.direction in ("UP", "DOWN"):
-        ml_strength = 1.0 if pred.direction == "UP" else 0.0
-        ml_voted = True
-    _layer(breakdown, "ml", ml_strength,
-           (f"Model says {pred.direction} "
-            f"({float(pred.test_direction_accuracy):.0f}% test accuracy)"
-            if ml_voted else "Model neutral or below coin-flip — no vote"))
+    ml_accuracy = (float(pred.test_direction_accuracy)
+                   if pred is not None and pred.test_direction_accuracy is not None
+                   else None)
 
-    # -- macro news tone (WSJ/FT/aggregated feeds via the cached digest) --
-    _layer(breakdown, "macro", MACRO_STRENGTH.get(macro_sentiment or "", NEUTRAL),
-           (f"Market-wide news tone reads {macro_sentiment}" if macro_sentiment
-            else "No macro digest yet — refresh market news"))
-
-    # -- regime --
-    _layer(breakdown, "regime", REGIME_STRENGTH.get(regime_code or "", NEUTRAL),
-           f"Market regime: {regime.get('label', 'unknown')}")
-
-    conviction = max(0.0, min(100.0, sum(b["points"] for b in breakdown)))
-
-    # -- risk-aware sizing: conviction sets the base, then volatility and data
-    #    completeness tilt it. Conviction says "how sure"; these say "how much". --
     atr_pct = None
     if snap is not None and snap.atr_14 is not None \
             and snap.close is not None and float(snap.close) > 0:
         atr_pct = round(float(snap.atr_14) / float(snap.close) * 100.0, 2)
-    vol_factor = _volatility_factor(atr_pct)
-    data_quality, missing = _data_quality(fundamentals is not None, news_score is not None)
 
-    # -- confidence: how sure we are of the conviction estimate --
-    consensus, dispersion = _consensus(breakdown)
-    conflicts = _conflicts(breakdown)
-    regime_support = _regime_support(session, regime_code)
-    # estimate_precision is 1.0 until the learner supplies weight confidence
-    # intervals (Module H) — kept explicit so it is a known gap, not a hidden one.
-    estimate_precision = 1.0
-    confidence = round(max(CONFIDENCE_FLOOR,
-                           data_quality * consensus * regime_support
-                           * estimate_precision), 3)
+    inputs = ScoringInputs(
+        ticker=ticker, name=name, sector=sector, close=close,
+        signal_names=tuple(r["strategy"] for r in sig_rows),
+        posture_points=posture_points, posture_note=posture_note,
+        quality_score=(quality or {}).get("score"),
+        quality_grade=(quality or {}).get("grade"),
+        news_score_out_of_10=news.get("score_out_of_10"),
+        news_note=news.get("note", ""), news_veto=bool(news.get("veto")),
+        news_sentiment=news.get("sentiment"),
+        rs_rank=rs,
+        ml_direction=(pred.direction if pred is not None else None),
+        ml_accuracy=ml_accuracy,
+        macro_sentiment=macro_sentiment,
+        regime_code=regime_code, regime_label=regime.get("label", "unknown"),
+        atr_pct=atr_pct, regime_support=_regime_support(session, regime_code))
 
-    base_mult = _risk_multiplier(conviction)
-    # Confidence replaces the old bare data-quality haircut: completeness is now
-    # one of four terms rather than the only one that mattered.
-    mult = 0.0 if news_veto else round(
-        min(RISK_MULT_CAP, base_mult * vol_factor * confidence), 2)
-
-    size_bits = [f"{base_mult:g}× base"]
-    if atr_pct is not None and vol_factor != 1.0:
-        size_bits.append(f"vol ×{vol_factor:g} (ATR {atr_pct:g}%"
-                         + (", calm" if vol_factor > 1 else ", volatile") + ")")
-    size_bits.append(f"confidence ×{confidence:g}")
-    if missing:
-        size_bits.append(f"missing {', '.join(missing)}")
-    if consensus < 0.6:
-        size_bits.append(f"layers disagree (consensus {consensus:g})")
-    size_note = (" · ".join(size_bits) + f" → {mult:g}× size") if base_mult else \
-        "Conviction too low to size"
-
+    result = score_setup(inputs, weights)
     return {
         "ticker": ticker, "name": name, "sector": sector, "close": close,
-        "strategies": [{"id": r["strategy_id"], "name": r["strategy"]} for r in sig_rows],
+        "strategies": [{"id": r["strategy_id"], "name": r["strategy"]}
+                       for r in sig_rows],
         "has_live_signal": bool(sig_rows),
-        "conviction": round(conviction),
-        # Conviction says how good; confidence says how sure. Kept separate on
-        # purpose — see docs/ADAPTIVE_PLATFORM_DESIGN.md §1.1.
-        "confidence": confidence,
-        "consensus": consensus,
-        "dispersion": dispersion,
-        "conflicts": conflicts,
-        "regime_support": regime_support,
-        "risk_multiplier": mult,
+        "conviction": result.conviction,
+        "confidence": result.confidence,
+        "consensus": result.consensus,
+        "dispersion": result.dispersion,
+        "conflicts": list(result.conflicts),
+        "regime_support": result.regime_support,
+        "risk_multiplier": result.risk_multiplier,
         "atr_pct": atr_pct,
-        "vol_factor": vol_factor,
-        "data_quality": data_quality,
-        "size_note": size_note,
-        "news_veto": news_veto,
-        "news_score": news_score,
-        "quality": q,
-        "sentiment": sentiment,
-        "verdict": ("VETOED" if news_veto else
-                    "HIGH" if conviction >= 75 else
-                    "NORMAL" if conviction >= 55 else
-                    "SMALL" if conviction >= 40 else "STAND_ASIDE"),
-        "breakdown": breakdown,
+        "vol_factor": result.vol_factor,
+        "data_quality": result.data_quality,
+        "size_note": result.size_note,
+        "news_veto": result.news_veto,
+        "news_score": news.get("score_out_of_10"),
+        "quality": quality,
+        "sentiment": news.get("sentiment"),
+        "verdict": result.verdict,
+        "weights_version_id": result.weights_version_id,
+        "breakdown": result.layer_dicts(),
     }
 
 
@@ -414,6 +362,11 @@ def alpha_stack(session: Session, ticker: str | None = None,
     regime_code = regime.get("regime") if regime.get("status") == "OK" else None
 
     from app.services.market_news_service import cached_macro_sentiment
+    from app.services.model_registry import champion_weights
+
+    # Weights come from the registry, not from an import — that indirection is
+    # what makes champion/challenger and reproducible attribution possible.
+    weights = champion_weights(session)
 
     if ticker and settings is not None:
         from app.services.news_sentiment_service import warm_macro
@@ -447,7 +400,7 @@ def alpha_stack(session: Session, ticker: str | None = None,
                       close=(float(sig_rows[0]["close"])
                              if sig_rows[0]["close"] is not None else None),
                       sig_rows=sig_rows, regime=regime, regime_code=regime_code,
-                      macro_sentiment=macro_sentiment)
+                      macro_sentiment=macro_sentiment, weights=weights)
         for symbol_id, sig_rows in by_symbol.items()
     ]
 
@@ -465,7 +418,7 @@ def alpha_stack(session: Session, ticker: str | None = None,
         setups = [_score_symbol(session, symbol_id=sym.id, ticker=sym.ticker,
                                 name=sym.name, sector=sym.sector, close=None,
                                 sig_rows=[], regime=regime, regime_code=regime_code,
-                                macro_sentiment=macro_sentiment)]
+                                macro_sentiment=macro_sentiment, weights=weights)]
 
     # Attach the deterministic rationale. Pure and cheap — every setup gets an
     # explanation derived from its own arithmetic, with no LLM on this path.

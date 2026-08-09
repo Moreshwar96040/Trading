@@ -289,6 +289,105 @@ public class MarketDataServiceClient {
         }
     }
 
+    /** Fit candidate weights and run every validation gate. Registers a SHADOW
+     *  version when all gates pass — never promotes, that stays a human call. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> proposeWeights(String horizon) {
+        try {
+            return http.post()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/conviction/propose")
+                            .queryParam("horizon", horizon).build())
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Weight proposal service unavailable", ex);
+        }
+    }
+
+    /** Partially-pooled weights per regime bucket, with the shrinkage shown. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getRegimeWeights(String horizon) {
+        try {
+            return http.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/conviction/regime-weights")
+                            .queryParam("horizon", horizon).build())
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Regime weight service unavailable", ex);
+        }
+    }
+
+    /** Every shadow challenger replayed against the live champion. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getShadowBoard(String horizon) {
+        try {
+            return http.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/shadow/board")
+                            .queryParam("horizon", horizon).build())
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Shadow evaluation unavailable", ex);
+        }
+    }
+
+    /** Conditions under which the autopilot must stop opening new positions. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getCircuitBreakers() {
+        try {
+            return http.get().uri("/internal/circuit-breakers")
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Circuit breaker check unavailable", ex);
+        }
+    }
+
+    /** Today's setups turned into a book under sector, correlation and risk caps. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getPortfolioPlan(double equity) {
+        try {
+            return http.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/portfolio/plan")
+                            .queryParam("equity", equity).build())
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Portfolio constructor unavailable", ex);
+        }
+    }
+
+    /** Registered model versions — the governance view. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> listModelVersions(String kind) {
+        try {
+            return http.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/models")
+                            .queryParam("kind", kind).build())
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Model registry unavailable", ex);
+        }
+    }
+
+    /** Promote a shadow version to champion. Attribution is mandatory upstream. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> promoteModel(long versionId, Map<String, Object> body) {
+        try {
+            return http.post().uri("/internal/models/{id}/promote", versionId)
+                    .body(body).retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Model promotion unavailable", ex);
+        }
+    }
+
+    /** Restore the previously retired champion. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> rollbackModel(Map<String, Object> body) {
+        try {
+            return http.post().uri("/internal/models/rollback")
+                    .body(body).retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Model rollback unavailable", ex);
+        }
+    }
+
     /** Closed FX/crypto trade analysis from the MT5 deal history (read-only). */
     @SuppressWarnings("unchecked")
     public Map<String, Object> getExnessTrades(int days) {

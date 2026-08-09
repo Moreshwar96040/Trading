@@ -10,7 +10,9 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterLink } from '@angular/router';
 
 import { AiPredictionRow, AiUsageSummary, AutopilotStatus,
-         ConvictionCalibration } from '../../core/models/market-data.models';
+         CircuitBreakerReport,
+         ConvictionCalibration, RegimeWeights, ShadowBoard,
+         WeightProposal } from '../../core/models/market-data.models';
 import { MarketDataService } from '../../core/services/market-data.service';
 
 /** Accuracy at or below this is a coin flip — the conviction engine ignores it. */
@@ -366,6 +368,179 @@ const GOOD_ACCURACY = 55;
       }
     }
 
+    <!-- ============ challenger proposal: what must a new model survive? ====== -->
+    <h3 class="cal-header">Challenger proposal
+      <span class="muted">· a candidate must pass every gate to be watched, and a
+        human to be traded</span></h3>
+
+    <div class="propose-row">
+      <button mat-stroked-button (click)="propose()" [disabled]="proposing()">
+        <mat-icon>science</mat-icon>
+        {{ proposing() ? 'Running gates…' : 'Fit & test a challenger' }}
+      </button>
+      <span class="muted small">Fits new weights on recorded history, runs five
+        validation gates, and registers a shadow model only on a clean sweep.
+        Nothing here changes what you trade.</span>
+    </div>
+
+    @if (proposal(); as p) {
+      <mat-card appearance="outlined" class="verdict"
+                [class.ok]="p.status === 'PASSED'" [class.no]="p.status !== 'PASSED'">
+        <mat-icon>{{ p.status === 'PASSED' ? 'verified' : 'block' }}</mat-icon>
+        <div>
+          <p class="vsum"><b>{{ p.summary }}</b></p>
+          <p class="muted small">
+            {{ p.n }} labelled setups
+            @if (p.oos_ic !== null && p.oos_ic !== undefined) {
+              · candidate out-of-sample IC <b>{{ p.oos_ic }}</b>
+            }
+            @if (p.champion_oos_ic !== null && p.champion_oos_ic !== undefined) {
+              vs champion {{ p.champion_oos_ic }}
+            }
+            @if (p.registered_version_id) {
+              · registered as shadow model #{{ p.registered_version_id }}
+            }
+          </p>
+          @if (p.note) { <p class="muted small">{{ p.note }}</p> }
+        </div>
+      </mat-card>
+
+      @if (p.gates?.length) {
+        <ul class="gates">
+          @for (g of p.gates; track g.gate) {
+            <li [class.pass]="g.passed" [class.fail]="!g.passed">
+              <mat-icon>{{ g.passed ? 'check_circle' : 'cancel' }}</mat-icon>
+              <b>{{ gateLabel(g.gate) }}</b>
+              <span class="muted">{{ g.reason }}</span>
+            </li>
+          }
+        </ul>
+      }
+
+      @if (p.candidate) {
+        <h4>Candidate weights</h4>
+        <p class="muted small">Shown for inspection. These are not in use until
+          promoted.</p>
+        <div class="chips">
+          @for (layer of layerOrder; track layer) {
+            <span class="wchip"><b>{{ layerLabel(layer) }}</b>
+              {{ p.candidate[layer] }}</span>
+          }
+        </div>
+      }
+    }
+
+    <!-- ============ regime-aware weights ============ -->
+    @if (regimeWeights(); as r) {
+      @if (r.status === 'OK') {
+        <h4>Weights by market regime</h4>
+        <p class="muted small">Each regime starts identical to the global fit and
+          drifts only in proportion to its own evidence — shrinkage
+          n/(n+{{ r.shrink_k }}). Five regimes collapse to three buckets for
+          learning, because a five-way split on this much data is noise.</p>
+        @for (b of r.buckets; track b.bucket) {
+          <div class="bucket">
+            <div class="bhead">
+              <b>{{ bucketLabel(b.bucket) }}</b>
+              <span class="muted small">{{ b.n }} setups · pulled
+                {{ (b.shrink * 100) | number: '1.0-0' }}% toward its own fit
+                @if (b.status === 'USING_GLOBAL') { · too thin to fit — using global }
+              </span>
+            </div>
+            <div class="chips">
+              @for (w of b.weights; track w.layer) {
+                <span class="wchip" [class.up]="w.drift > 1" [class.down]="w.drift < -1">
+                  <b>{{ layerLabel(w.layer) }}</b> {{ w.weight }}
+                  @if (w.drift !== 0) {
+                    <em>{{ w.drift > 0 ? '+' : '' }}{{ w.drift }}</em>
+                  }
+                </span>
+              }
+            </div>
+          </div>
+        }
+      }
+    }
+
+    <!-- ============ circuit breakers ============ -->
+    @if (breakers(); as b) {
+      <h3 class="cal-header">Circuit breakers
+        <span class="muted">· when the system must stop trading itself</span></h3>
+      <mat-card appearance="outlined" class="verdict"
+                [class.ok]="!b.halted" [class.no]="b.halted">
+        <mat-icon>{{ b.halted ? 'pause_circle' : 'play_circle' }}</mat-icon>
+        <div>
+          <p class="vsum"><b>{{ b.halted ? 'Entries halted' : 'Trading allowed' }}</b></p>
+          <p class="muted small">{{ b.summary }}</p>
+        </div>
+      </mat-card>
+      <ul class="gates">
+        @for (br of b.breakers; track br.breaker) {
+          <li [class.pass]="!br.tripped" [class.fail]="br.tripped">
+            <mat-icon>{{ br.tripped ? (br.severity === 'HALT' ? 'cancel' : 'warning')
+                                    : 'check_circle' }}</mat-icon>
+            <b>{{ breakerLabel(br.breaker) }}</b>
+            <span class="muted">{{ br.reason }}</span>
+          </li>
+        }
+      </ul>
+    }
+
+    <!-- ============ promotion: the human decision ============ -->
+    @if (shadowBoard(); as s) {
+      <h3 class="cal-header">Champion &amp; challengers
+        <span class="muted">· replayed on identical history — promotion is yours to make</span></h3>
+      <p class="muted small">
+        Live model: <b>{{ s.champion?.label ?? 'baseline defaults' }}</b>.
+        {{ s.shadows.length }} challenger(s) in shadow,
+        {{ s.promotable }} currently ahead. {{ s.note }}
+      </p>
+
+      @if (s.shadows.length) {
+        @for (sh of s.shadows; track sh.version_id) {
+          <mat-card appearance="outlined" class="challenger">
+            <div class="chead">
+              <b>{{ sh.label }}</b>
+              <span class="pill" [class.ahead]="sh.verdict === 'CHALLENGER_AHEAD'"
+                    [class.behind]="sh.verdict === 'CHAMPION_AHEAD'">
+                {{ verdictLabel(sh.verdict) }}</span>
+              <span class="muted small">#{{ sh.version_id }}</span>
+            </div>
+            <p class="muted small">{{ sh.note }}</p>
+            @if (sh.status === 'OK') {
+              <p class="muted small">
+                Challenger IC <b>{{ sh.candidate_ic }}</b> vs champion
+                <b>{{ sh.champion_ic }}</b> on {{ sh.n }} setups
+                @if (sh.rank_agreement !== null && sh.rank_agreement !== undefined) {
+                  · ranks {{ (sh.rank_agreement * 100) | number: '1.0-0' }}% the same
+                }
+              </p>
+              @if (sh.candidate_weights; as cw) {
+                <div class="chips">
+                  @for (layer of layerOrder; track layer) {
+                    <span class="wchip"><b>{{ layerLabel(layer) }}</b>
+                      {{ cw[layer] }}</span>
+                  }
+                </div>
+              }
+              <button mat-stroked-button color="primary"
+                      [disabled]="promoting() || sh.verdict !== 'CHALLENGER_AHEAD'"
+                      (click)="promote(sh.version_id, sh.label ?? '')">
+                <mat-icon>publish</mat-icon> Promote to champion
+              </button>
+              @if (sh.verdict !== 'CHALLENGER_AHEAD') {
+                <span class="muted small hint">Only a challenger that is measurably
+                  ahead can be promoted from here.</span>
+              }
+            }
+          </mat-card>
+        }
+        <button mat-button (click)="rollback()" [disabled]="promoting()">
+          <mat-icon>undo</mat-icon> Roll back to the previous champion
+        </button>
+      }
+    }
+
     <!-- ============ what the LLM layer costs ============ -->
     <h3 class="cost-header">AI spend</h3>
     @if (usage(); as u) {
@@ -460,6 +635,41 @@ const GOOD_ACCURACY = 55;
     .veto { display: flex; align-items: center; gap: 8px; font-size: 13px;
             color: var(--text-dim); margin-top: 14px; }
     .veto mat-icon { font-size: 17px; width: 17px; height: 17px; }
+    .small { font-size: 12.5px; }
+    .propose-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+                   margin: 10px 0 14px; }
+    .propose-row .muted { flex: 1 1 320px; line-height: 1.5; }
+    .verdict { display: flex; gap: 12px; padding: 14px 16px; align-items: flex-start;
+               border-left: 3px solid var(--text-dim); }
+    .verdict.ok { border-left-color: var(--up); }
+    .verdict.no { border-left-color: var(--down); }
+    .verdict p { margin: 0 0 4px; }
+    .vsum { font-size: 13.5px; }
+    .gates { list-style: none; padding: 0; margin: 12px 0 0;
+             display: flex; flex-direction: column; gap: 6px; }
+    .gates li { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+    .gates mat-icon { font-size: 17px; width: 17px; height: 17px; }
+    .gates li.pass mat-icon { color: var(--up); }
+    .gates li.fail mat-icon { color: var(--down); }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 4px; }
+    .wchip { font-size: 12px; padding: 5px 10px; border-radius: 8px;
+             background: var(--surface-2); border: 1px solid var(--border);
+             display: inline-flex; gap: 6px; align-items: baseline; }
+    .wchip b { font-weight: 600; color: var(--text-dim); }
+    .wchip em { font-style: normal; font-weight: 700; font-size: 11px; }
+    .wchip.up em { color: var(--up); }
+    .wchip.down em { color: var(--down); }
+    .bucket { margin: 12px 0 4px; }
+    .bhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .challenger { padding: 14px 16px; margin: 10px 0; }
+    .challenger p { margin: 4px 0 8px; }
+    .chead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .pill { font-size: 10px; font-weight: 800; letter-spacing: 0.05em;
+            padding: 2px 9px; border-radius: 999px; text-transform: uppercase;
+            background: var(--surface-2); color: var(--text-dim); }
+    .pill.ahead { background: rgba(38,166,154,0.15); color: var(--up); }
+    .pill.behind { background: rgba(239,83,80,0.15); color: var(--down); }
+    .hint { margin-left: 10px; }
   `,
 })
 export class AiPageComponent implements OnInit {
@@ -481,7 +691,16 @@ export class AiPageComponent implements OnInit {
   readonly usage = signal<AiUsageSummary | null>(null);
   readonly calibration = signal<ConvictionCalibration | null>(null);
   readonly autopilot = signal<AutopilotStatus | null>(null);
+  readonly proposal = signal<WeightProposal | null>(null);
+  readonly regimeWeights = signal<RegimeWeights | null>(null);
+  readonly breakers = signal<CircuitBreakerReport | null>(null);
+  readonly shadowBoard = signal<ShadowBoard | null>(null);
   readonly training = signal(false);
+  readonly proposing = signal(false);
+  readonly promoting = signal(false);
+
+  readonly layerOrder = ['technical', 'quality', 'news', 'momentum',
+                         'ml', 'macro', 'regime'];
 
   /** Models the Alpha Stack will actually listen to. */
   readonly usefulCount = computed(() => this.rows().filter(
@@ -502,6 +721,110 @@ export class AiPageComponent implements OnInit {
     this.loadUsage();
     this.loadCalibration();
     this.loadAutopilot();
+    this.loadRegimeWeights();
+    this.loadGovernance();
+  }
+
+  private loadGovernance(): void {
+    this.api.getCircuitBreakers().subscribe({
+      next: (b) => this.breakers.set(b),
+      error: () => this.breakers.set(null),      // additive panel — fail quietly
+    });
+    this.api.getShadowBoard().subscribe({
+      next: (s) => this.shadowBoard.set(s),
+      error: () => this.shadowBoard.set(null),
+    });
+  }
+
+  /** Promotion is the one place a human must be named — the audit trail is the
+   *  whole reason the registry exists. */
+  promote(versionId: number, label: string): void {
+    const approvedBy = window.prompt(
+      `Promote "${label}" to champion?\n\nYour name (recorded in the audit trail):`);
+    if (!approvedBy?.trim()) return;
+    const reason = window.prompt('Reason (optional):') ?? undefined;
+    this.promoting.set(true);
+    this.api.promoteModel(versionId, approvedBy.trim(), reason).subscribe({
+      next: () => {
+        this.promoting.set(false);
+        this.snackBar.open(`${label} is now the champion`, undefined,
+                           { duration: 4000 });
+        this.loadGovernance();
+        this.loadCalibration();
+      },
+      error: () => {
+        this.promoting.set(false);
+        this.snackBar.open('Promotion failed', 'Dismiss', { duration: 4000 });
+      },
+    });
+  }
+
+  rollback(): void {
+    const actor = window.prompt('Roll back to the previous champion.\n\nYour name:');
+    if (!actor?.trim()) return;
+    this.promoting.set(true);
+    this.api.rollbackModel(actor.trim(), window.prompt('Reason (optional):')
+                                         ?? undefined).subscribe({
+      next: () => {
+        this.promoting.set(false);
+        this.snackBar.open('Rolled back', undefined, { duration: 4000 });
+        this.loadGovernance();
+      },
+      error: () => {
+        this.promoting.set(false);
+        this.snackBar.open('Rollback failed', 'Dismiss', { duration: 4000 });
+      },
+    });
+  }
+
+  breakerLabel(breaker: string): string {
+    return { drawdown: 'Drawdown', loss_streak: 'Losing streak',
+             ic_collapse: 'Signal decay', stale_data: 'Data freshness',
+             dead_labels: 'Learning loop' }[breaker] ?? breaker;
+  }
+
+  verdictLabel(verdict: string | undefined): string {
+    return { CHALLENGER_AHEAD: 'Ahead', CHAMPION_AHEAD: 'Behind', TIE: 'Tied',
+             UNCLEAR: 'Unclear', NO_DATA: 'No history',
+             INSUFFICIENT: 'Too little history' }[verdict ?? ''] ?? 'Unknown';
+  }
+
+  private loadRegimeWeights(): void {
+    this.api.getRegimeWeights().subscribe({
+      next: (r) => this.regimeWeights.set(r),
+      error: () => this.regimeWeights.set(null),   // additive panel — fail quietly
+    });
+  }
+
+  /** Fit a challenger and run the gates. Deliberately manual: this is a decision
+   *  point, not background housekeeping. */
+  propose(): void {
+    this.proposing.set(true);
+    this.api.proposeWeights().subscribe({
+      next: (p) => {
+        this.proposing.set(false);
+        this.proposal.set(p);
+        this.snackBar.open(p.summary ?? 'Proposal complete', undefined,
+                           { duration: 5000 });
+        this.loadRegimeWeights();
+      },
+      error: () => {
+        this.proposing.set(false);
+        this.snackBar.open('Could not run the proposal', 'Dismiss',
+                           { duration: 4000 });
+      },
+    });
+  }
+
+  gateLabel(gate: string): string {
+    return { sample_size: 'Sample size', oos_ic: 'Out-of-sample IC',
+             turnover: 'Ranking churn', sign_flip: 'Direction reversal',
+             stability: 'Bootstrap stability' }[gate] ?? gate;
+  }
+
+  bucketLabel(bucket: string): string {
+    return { risk_on: 'Risk-on', neutral: 'Neutral / chop',
+             risk_off: 'Risk-off' }[bucket] ?? bucket;
   }
 
   private loadAutopilot(): void {

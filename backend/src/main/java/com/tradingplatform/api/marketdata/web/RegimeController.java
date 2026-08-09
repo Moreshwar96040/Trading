@@ -105,6 +105,71 @@ public class RegimeController {
         return marketData.getConvictionCalibration(horizon);
     }
 
+    /** POST /api/v1/conviction/propose — fit candidate weights, run the validation
+     *  gates, and register a SHADOW challenger if every gate passes. Promotion
+     *  remains a separate, human action. */
+    @org.springframework.web.bind.annotation.PostMapping("/conviction/propose")
+    public Map<String, Object> proposeWeights(
+            @org.springframework.web.bind.annotation.RequestParam(
+                    defaultValue = "fwd_return_10d") String horizon) {
+        return marketData.proposeWeights(horizon);
+    }
+
+    /** GET /api/v1/conviction/regime-weights — partially-pooled weights per
+     *  regime bucket. Diagnostic: shows how far each regime has earned the right
+     *  to drift from the global fit. */
+    @GetMapping("/conviction/regime-weights")
+    public Map<String, Object> regimeWeights(
+            @org.springframework.web.bind.annotation.RequestParam(
+                    defaultValue = "fwd_return_10d") String horizon) {
+        return marketData.getRegimeWeights(horizon);
+    }
+
+    /** GET /api/v1/models/shadow-board — challengers replayed against the champion. */
+    @GetMapping("/models/shadow-board")
+    public Map<String, Object> shadowBoard(
+            @org.springframework.web.bind.annotation.RequestParam(
+                    defaultValue = "fwd_return_10d") String horizon) {
+        return marketData.getShadowBoard(horizon);
+    }
+
+    /** GET /api/v1/models — every registered version, champion and shadow. */
+    @GetMapping("/models")
+    public Map<String, Object> models(
+            @org.springframework.web.bind.annotation.RequestParam(
+                    defaultValue = "WEIGHTS") String kind) {
+        return marketData.listModelVersions(kind);
+    }
+
+    /** POST /api/v1/models/{id}/promote — make a challenger live. Audited. */
+    @org.springframework.web.bind.annotation.PostMapping("/models/{id}/promote")
+    public Map<String, Object> promoteModel(
+            @org.springframework.web.bind.annotation.PathVariable long id,
+            @org.springframework.web.bind.annotation.RequestBody Map<String, Object> body) {
+        return marketData.promoteModel(id, body);
+    }
+
+    /** POST /api/v1/models/rollback — restore the previous champion. */
+    @org.springframework.web.bind.annotation.PostMapping("/models/rollback")
+    public Map<String, Object> rollbackModel(
+            @org.springframework.web.bind.annotation.RequestBody Map<String, Object> body) {
+        return marketData.rollbackModel(body);
+    }
+
+    /** GET /api/v1/circuit-breakers — why the autopilot is or isn't trading. */
+    @GetMapping("/circuit-breakers")
+    public Map<String, Object> circuitBreakers() {
+        return marketData.getCircuitBreakers();
+    }
+
+    /** GET /api/v1/portfolio/plan — today's setups as a constrained book. */
+    @GetMapping("/portfolio/plan")
+    public Map<String, Object> portfolioPlan(
+            @org.springframework.web.bind.annotation.RequestParam(
+                    defaultValue = "1000000") double equity) {
+        return marketData.getPortfolioPlan(equity);
+    }
+
     /** GET /api/v1/exness/trades?days=90 — closed FX/crypto trade analysis. */
     @GetMapping("/exness/trades")
     public Map<String, Object> exnessTrades(

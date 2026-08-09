@@ -8,12 +8,14 @@ import {
   AiPredictionRow, AiRiskPlan, AiUsageSummary, AlertInfo, AlphaStack, AutopilotStatus,
   BacktestDetail,
   BacktestRunParams, CandleSeries,
-  ConvictionCalibration, DataHealth, EdgeGatesReport,
+  CircuitBreakerReport,
+  ConvictionCalibration, DataHealth, EdgeGatesReport, PortfolioPlan, ShadowBoard,
   FundamentalsData, FxAccountReport, FxTradeReview, GuardianReport, IndicatorSeries,
   InsightResponse, JournalEntry,
   LeaksReport, LiveHolding, MarketNewsResponse, MomentumBoard, MorningBriefing,
   PortfolioAlphaReview,
-  NewsRefreshResult, NewsResponse, PaperAccount, PaperOrder, RegimeInfo,
+  NewsRefreshResult, NewsResponse, PaperAccount, PaperOrder, RegimeInfo, RegimeWeights,
+  WeightProposal,
   PositionSizeResult, Quote, RiskReport, RiskSettings, ScreenRequest, ScreenRow,
   ScreenerFieldsMeta, SignalInfo, StrategyDefinition, StrategyInfo, StrategyScore,
   SymbolInfo, SymbolLookupResult, TradeIdeasResponse, UpstoxStatus,
@@ -271,6 +273,49 @@ export class MarketDataService {
   getConvictionCalibration(horizon = 'fwd_return_10d'): Observable<ConvictionCalibration> {
     return this.http.get<ConvictionCalibration>(`${this.base}/conviction/calibration`,
                                                 { params: { horizon } });
+  }
+
+  /** Fit a candidate weight set and run it past every validation gate. On a
+   *  clean sweep it is registered as a SHADOW challenger — never promoted. */
+  proposeWeights(horizon = 'fwd_return_10d'): Observable<WeightProposal> {
+    return this.http.post<WeightProposal>(`${this.base}/conviction/propose`, null,
+                                          { params: { horizon } });
+  }
+
+  /** How far each regime has earned the right to drift from the global weights. */
+  getRegimeWeights(horizon = 'fwd_return_10d'): Observable<RegimeWeights> {
+    return this.http.get<RegimeWeights>(`${this.base}/conviction/regime-weights`,
+                                        { params: { horizon } });
+  }
+
+  /** Challengers replayed against the champion — the promotion decision screen. */
+  getShadowBoard(horizon = 'fwd_return_10d'): Observable<ShadowBoard> {
+    return this.http.get<ShadowBoard>(`${this.base}/models/shadow-board`,
+                                      { params: { horizon } });
+  }
+
+  /** Make a challenger live. `approvedBy` is mandatory — promotions are audited. */
+  promoteModel(versionId: number, approvedBy: string,
+               reason?: string): Observable<Record<string, unknown>> {
+    return this.http.post<Record<string, unknown>>(
+      `${this.base}/models/${versionId}/promote`,
+      { approved_by: approvedBy, reason });
+  }
+
+  rollbackModel(actor: string, reason?: string): Observable<Record<string, unknown>> {
+    return this.http.post<Record<string, unknown>>(
+      `${this.base}/models/rollback`, { actor, reason });
+  }
+
+  /** Why the autopilot is, or is not, allowed to open new positions. */
+  getCircuitBreakers(): Observable<CircuitBreakerReport> {
+    return this.http.get<CircuitBreakerReport>(`${this.base}/circuit-breakers`);
+  }
+
+  /** Today's setups turned into a book under sector, correlation and risk caps. */
+  getPortfolioPlan(equity: number): Observable<PortfolioPlan> {
+    return this.http.get<PortfolioPlan>(`${this.base}/portfolio/plan`,
+                                        { params: { equity } });
   }
 
   getAiUsage(): Observable<AiUsageSummary> {

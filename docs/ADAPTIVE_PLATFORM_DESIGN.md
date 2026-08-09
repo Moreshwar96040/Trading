@@ -490,3 +490,106 @@ calibration curve is flat, the correct conclusion is that *the layers don't pred
 and no amount of reweighting, regime conditioning or extra ML will rescue it. The system
 should be capable of telling you that clearly. A platform that can't return a negative
 verdict about itself isn't a measurement instrument; it's a persuasion machine.
+
+---
+
+## Part 7 — Implementation status (as built)
+
+Every phase in Part 4 is now implemented. What follows is what actually shipped,
+including the places where the build deviated from this document — those
+deviations are the interesting part.
+
+### Phase 1 — Conviction, confidence, consensus, explanation
+
+| Piece | Where |
+| --- | --- |
+| Confidence = completeness x consensus x regime support | `app/scoring/engine.py` |
+| Consensus from weighted layer dispersion | `app/services/conviction_service.py` |
+| Conflict detection between materially-weighted layers | `app/scoring/engine.py` |
+| Deterministic reasoning (Tier 1) | `app/ai/reasoning.py` |
+
+### Phase 2 — Pure scoring engine + model registry
+
+| Piece | Where |
+| --- | --- |
+| Typed contracts (`ScoringInputs`, `WeightSet`, `LayerScore`, `Score`) | `app/scoring/contracts.py` |
+| Pure `score(inputs, weights)` — no DB, no clock, no network | `app/scoring/engine.py` |
+| Model registry, one champion per kind (DB-enforced) | `app/services/model_registry.py`, migration V22 |
+| Point-in-time feature store | `app/features/store.py` |
+
+### Phase 3 — Validation gates + hierarchical regime weights
+
+| Piece | Where |
+| --- | --- |
+| Five gates: sample size, OOS IC, turnover, sign flip, bootstrap stability | `app/ai/gates.py` |
+| Partially-pooled regime weights, `w = w_global + n/(n+200)(w_raw - w_global)` | `app/ai/calibration.py::learn_regime_weights` |
+| Gated proposal that registers SHADOW only | `app/ai/calibration.py::propose_weights` |
+| `POST /internal/conviction/propose`, `GET /internal/conviction/regime-weights` | `app/api/routes.py` |
+
+**Deviation:** the design implies five regimes each get their own weights. Learning
+collapses them to three buckets (risk-on / neutral / risk-off) because seven weights
+across five regimes divides thin data five ways to estimate 35 parameters. Display
+still shows all five.
+
+### Phase 4 — Shadow mode, governance, circuit breakers, portfolio construction
+
+| Piece | Where |
+| --- | --- |
+| Shadow evaluation by replay | `app/ai/shadow.py` |
+| Circuit breakers (drawdown, loss streak, IC collapse, stale data, dead labels) | `app/services/circuit_breakers.py` |
+| Constraint-based portfolio constructor | `app/services/portfolio_constructor.py` |
+| Promotion / rollback UI with mandatory attribution | `frontend/.../ai-page.component.ts` |
+
+**The significant deviation — shadow mode by replay, not by recording.**
+
+Prompt I specifies that the challenger scores every setup alongside the champion each
+day, with both recorded. We do not do that, and the reason is worth stating: conviction
+is a *linear* function of the layer strengths, and the strengths are already persisted
+in `conviction_history`. A shadow conviction is therefore just a weighted sum over rows
+we recorded anyway.
+
+Three consequences, all improvements:
+
+* no second table, no second daily job, nothing extra to keep alive;
+* a challenger registered today is evaluated on **all** history, not only on days
+  after registration — which turns a six-month wait into an immediate answer;
+* champion and challenger see byte-identical inputs, so any difference is
+  attributable to the weights alone.
+
+The limit is real and is enforced rather than assumed: replay is only valid for
+challengers that change *weights*. A challenger that changes how a layer is
+*computed* produces different strengths, and those cannot be reconstructed.
+`evaluate_candidate` refuses any non-`WEIGHTS` version with an explicit reason
+instead of quietly returning a wrong number.
+
+**Circuit breakers halt entries, never liquidate.** Forced selling on a metric turns
+a bad week into a bad year; open positions keep their stops and exit on their own
+terms. Reset is manual — an auto-resetting breaker just lets the same failure
+repeat on a timer.
+
+**The portfolio constructor is greedy under hard caps, not optimised.** A
+mean-variance optimiser needs expected returns and a covariance matrix, both
+estimated from the same short, noisy history, and it then concentrates precisely
+where the estimation error is largest. Greedy selection under sector, correlation,
+per-name and total-risk caps is worse in theory and considerably better at this
+data scale. Risk is budgeted by distance-to-stop, not by slot count, so a quiet
+stock and a volatile one no longer count the same.
+
+### Test coverage
+
+402 Python tests. The learning-pipeline suites are:
+`test_gates.py` (16), `test_weight_proposal.py` (11), `test_shadow.py` (12),
+`test_circuit_breakers.py` (19), `test_portfolio_constructor.py` (19),
+plus `test_scoring_engine.py`, `test_calibration.py` and `test_feature_store.py`.
+
+Each gate and each breaker is independently triggerable — a rejection that cannot be
+traced to one named check is not an explanation.
+
+### What is still deliberately absent
+
+* **No automatic promotion.** Passing every gate and winning the replay earns a
+  challenger the right to be *watched*. Going live needs a named human, and it is
+  recorded in `model_version_audit`.
+* **No live trading.** The autopilot is paper-only; there is no live code path.
+* **No forward shadow recording** for non-weight challengers — needed before the
+  first challenger that changes a layer's computation.

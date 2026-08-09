@@ -102,6 +102,9 @@ def record_conviction(session: Session, settings=None,
         row.atr_pct = setup.get("atr_pct")
         row.data_quality = setup.get("data_quality")
         row.close = float(snap.close)
+        # Stamp the model that produced this score — the whole point of the
+        # registry is that a stored score is never ambiguous about its origin.
+        row.model_version_id = setup.get("weights_version_id")
         row.recorded_at = datetime.now(timezone.utc)
         session.merge(row)
         recorded += 1

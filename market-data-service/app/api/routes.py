@@ -491,6 +491,93 @@ def ai_usage(session: Session = Depends(get_session),
             "usd_to_inr": settings.usd_to_inr}
 
 
+@router.post("/internal/conviction/propose")
+def conviction_propose(horizon: str = "fwd_return_10d",
+                       session: Session = Depends(get_session)) -> dict:
+    """Fit candidate weights, run every validation gate, and register a SHADOW
+    version if all pass. Never promotes — that stays a human decision."""
+    from app.ai.calibration import propose_weights
+    return propose_weights(session, horizon=horizon)
+
+
+@router.get("/internal/conviction/regime-weights")
+def conviction_regime_weights(horizon: str = "fwd_return_10d",
+                              session: Session = Depends(get_session)) -> dict:
+    """Partially-pooled weights per regime bucket, with the shrinkage applied."""
+    from app.ai.calibration import learn_regime_weights
+    return learn_regime_weights(session, horizon=horizon)
+
+
+@router.get("/internal/shadow/board")
+def shadow_board_endpoint(horizon: str = "fwd_return_10d",
+                          session: Session = Depends(get_session)) -> dict:
+    """Every shadow challenger replayed against the champion on the same history
+    — the promotion decision screen."""
+    from app.ai.shadow import shadow_board
+    return shadow_board(session, horizon=horizon)
+
+
+@router.get("/internal/shadow/{version_id}")
+def shadow_evaluate(version_id: int, horizon: str = "fwd_return_10d",
+                    session: Session = Depends(get_session)) -> dict:
+    """Replay one registered version against the live champion."""
+    from app.ai.shadow import evaluate_candidate
+    return evaluate_candidate(session, version_id, horizon=horizon)
+
+
+@router.get("/internal/circuit-breakers")
+def circuit_breakers_endpoint(session: Session = Depends(get_session)) -> dict:
+    """Conditions under which the autopilot must stop opening new positions."""
+    from app.services.circuit_breakers import evaluate
+    return evaluate(session)
+
+
+@router.get("/internal/portfolio/plan")
+def portfolio_plan(equity: float = 1_000_000.0,
+                   session: Session = Depends(get_session)) -> dict:
+    """Today's Alpha Stack setups turned into a book under sector, correlation
+    and risk-budget caps — with a reason recorded for every rejection."""
+    from app.services.conviction_service import alpha_stack
+    from app.services.portfolio_constructor import build_from_setups
+    if equity <= 0:
+        raise HTTPException(status_code=400, detail="equity must be positive")
+    stack = alpha_stack(session)
+    return build_from_setups(session, stack.get("setups") or [], equity)
+
+
+@router.get("/internal/models")
+def models_list(kind: str = "WEIGHTS", session: Session = Depends(get_session)) -> dict:
+    """Every registered model version — the governance view."""
+    from app.services.model_registry import list_versions
+    return list_versions(session, kind=kind)
+
+
+@router.post("/internal/models/{version_id}/promote")
+def models_promote(version_id: int, body: dict | None = None,
+                   session: Session = Depends(get_session)) -> dict:
+    """Make a SHADOW version the live CHAMPION. Requires `approved_by` — an
+    unattributed promotion is exactly the silent self-modification we forbid."""
+    from app.services.model_registry import promote
+    body = body or {}
+    approved_by = (body.get("approved_by") or "").strip()
+    if not approved_by:
+        raise HTTPException(status_code=400,
+                            detail="approved_by is required — promotions are audited.")
+    return promote(session, version_id, approved_by, body.get("reason"))
+
+
+@router.post("/internal/models/rollback")
+def models_rollback(body: dict | None = None,
+                    session: Session = Depends(get_session)) -> dict:
+    """Restore the previously retired champion — one-step, audited."""
+    from app.services.model_registry import rollback
+    body = body or {}
+    actor = (body.get("actor") or "").strip()
+    if not actor:
+        raise HTTPException(status_code=400, detail="actor is required.")
+    return rollback(session, actor, body.get("reason"))
+
+
 @router.post("/internal/features/backfill")
 def features_backfill(days: int = 400, body: dict | None = None,
                       session: Session = Depends(get_session)) -> dict:

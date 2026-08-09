@@ -516,6 +516,96 @@ export interface ConvictionCalibration {
   generated_at?: string;
 }
 
+/** One validation gate's verdict. A rejection must always name its gate. */
+export interface GateVerdict {
+  gate: string;
+  passed: boolean;
+  reason: string;
+  detail?: Record<string, unknown>;
+}
+
+/** Result of fitting candidate weights and running them past every gate.
+ *  A PASSED candidate is registered as SHADOW — watched, not traded. */
+export interface WeightProposal {
+  status: 'PASSED' | 'REJECTED';
+  n: number;
+  horizon?: string;
+  candidate?: Record<string, number>;
+  oos_ic?: number | null;
+  champion_oos_ic?: number | null;
+  passed?: boolean;
+  failed?: string[];
+  gates?: GateVerdict[];
+  summary?: string;
+  registered_version_id?: number;
+  note?: string;
+}
+
+/** Partially-pooled weights per regime bucket. */
+export interface RegimeWeights {
+  status: 'OK' | 'COLLECTING' | 'INSUFFICIENT';
+  n: number;
+  note?: string;
+  shrink_k?: number;
+  horizon?: string;
+  global_weights?: Record<string, number>;
+  buckets?: { bucket: string; n: number; shrink: number;
+              status: 'OK' | 'USING_GLOBAL';
+              weights: { layer: string; weight: number; drift: number }[] }[];
+}
+
+/** One challenger replayed against the champion on identical history. */
+export interface ShadowResult {
+  status: 'OK' | 'NOT_FOUND' | 'UNSUPPORTED' | 'IS_CHAMPION';
+  version_id: number;
+  label?: string;
+  version_status?: string;
+  n?: number;
+  champion_label?: string;
+  champion_ic?: number | null;
+  candidate_ic?: number | null;
+  ic_gain?: number | null;
+  rank_agreement?: number | null;
+  candidate_weights?: Record<string, number>;
+  verdict?: 'CHALLENGER_AHEAD' | 'CHAMPION_AHEAD' | 'TIE' | 'UNCLEAR'
+          | 'NO_DATA' | 'INSUFFICIENT';
+  note?: string;
+}
+
+export interface ShadowBoard {
+  champion: { id: number; label: string } | null;
+  horizon: string;
+  shadows: ShadowResult[];
+  promotable: number;
+  note?: string;
+}
+
+/** Conditions under which the autopilot must stop opening new positions. */
+export interface CircuitBreakerReport {
+  halted: boolean;
+  halt_reasons: string[];
+  warnings: string[];
+  breakers: { breaker: string; tripped: boolean; severity: 'HALT' | 'WARN' | 'OK';
+              reason: string; detail?: Record<string, unknown> }[];
+  summary: string;
+  note?: string;
+}
+
+/** A ranked candidate list turned into a book under hard constraints. */
+export interface PortfolioPlan {
+  allocations: { ticker: string; symbol_id: number; conviction: number;
+                 quantity: number; entry_price: number; stop: number;
+                 risk_amount: number; risk_share: number;
+                 sector: string | null; note: string }[];
+  rejected: { ticker: string; reason: string }[];
+  risk_deployed: number;
+  risk_budget: number;
+  risk_used_pct: number;
+  sector_risk: Record<string, number>;
+  positions: number;
+  note: string;
+}
+
 /** Paper autopilot: the Alpha Stack trading its own signals, graded on money. */
 export interface AutopilotStatus {
   enabled: boolean;
