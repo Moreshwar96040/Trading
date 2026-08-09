@@ -247,6 +247,168 @@ def _learn_weights(frame, current: dict) -> dict:
     }
 
 
+# --- Hierarchical regime weights -------------------------------------------
+#: Five regimes divided by our data volume is a resolution we cannot support for
+#: years, so learning collapses them to three. Display keeps all five.
+REGIME_BUCKET = {"RISK_ON": "risk_on", "PULLBACK": "neutral", "CHOP": "neutral",
+                 "BEAR_RALLY": "risk_off", "RISK_OFF": "risk_off"}
+#: Shrinkage constant. With n samples a regime moves n/(n+k) of the way from the
+#: global weights toward its own fit — so 20 samples barely move, 800 mostly do.
+REGIME_SHRINK_K = 200
+
+
+def learn_regime_weights(session, horizon: str = "fwd_return_10d") -> dict:
+    """Partially-pooled weights per regime bucket.
+
+    Fitting each regime independently would be 7 weights x 5 regimes = 35
+    parameters while *dividing* the data — noise wearing a confident label, and
+    most wrong exactly when regimes shift. Instead each bucket starts identical
+    to the global fit and drifts only in proportion to its own evidence.
+    """
+    from app.services.conviction_service import LAYER_WEIGHTS
+
+    frame = _load_frame(session, horizon)
+    if frame.empty:
+        return {"status": "COLLECTING", "n": 0, "buckets": []}
+
+    current = {layer: LAYER_WEIGHTS[layer] for layer in LAYERS}
+    global_fit = _learn_weights(frame, current)
+    if global_fit.get("status") != "OK":
+        return {"status": global_fit.get("status", "INSUFFICIENT"),
+                "n": int(len(frame)),
+                "note": "Global weights must be learnable before regime splits."}
+    global_weights = {row["layer"]: row["suggested"] for row in global_fit["weights"]}
+
+    frame = frame.copy()
+    frame["bucket"] = frame["regime_code"].map(
+        lambda code: REGIME_BUCKET.get(code or "", "neutral"))
+
+    buckets = []
+    for bucket, group in frame.groupby("bucket"):
+        n = int(len(group))
+        raw = _learn_weights(group, current)
+        shrink = round(n / (n + REGIME_SHRINK_K), 3)
+        if raw.get("status") != "OK":
+            # Not enough data for its own fit — that is fine, and the honest
+            # answer is simply the global weights.
+            buckets.append({"bucket": bucket, "n": n, "shrink": shrink,
+                            "status": "USING_GLOBAL",
+                            "weights": [{"layer": layer, "weight": global_weights[layer],
+                                         "drift": 0.0} for layer in LAYERS]})
+            continue
+        raw_weights = {row["layer"]: row["suggested"] for row in raw["weights"]}
+        pooled = {layer: global_weights[layer]
+                  + shrink * (raw_weights[layer] - global_weights[layer])
+                  for layer in LAYERS}
+        scale = 100.0 / sum(pooled.values())
+        pooled = {layer: round(v * scale, 1) for layer, v in pooled.items()}
+        buckets.append({
+            "bucket": bucket, "n": n, "shrink": shrink, "status": "OK",
+            "weights": [{"layer": layer, "weight": pooled[layer],
+                         "drift": round(pooled[layer] - global_weights[layer], 1)}
+                        for layer in LAYERS]})
+
+    return {"status": "OK", "horizon": horizon, "n": int(len(frame)),
+            "shrink_k": REGIME_SHRINK_K,
+            "global_weights": global_weights, "buckets": buckets,
+            "note": ("Each regime starts at the global weights and drifts only in "
+                     "proportion to its own evidence — with little data the drift "
+                     "is near zero by construction.")}
+
+
+def _bootstrap_weights(frame, current: dict, rounds: int = 100) -> list:
+    """Refit on resampled data to see whether the weights hold still."""
+    import numpy as np
+    rng = np.random.default_rng(12345)          # seeded: stability must be reproducible
+    feature_cols = [f"{layer}_strength" for layer in LAYERS]
+    data = frame[feature_cols + ["label"]].dropna()
+    n = len(data)
+    if n < MIN_SAMPLES_WEIGHTS:
+        return []
+    out = []
+    for _ in range(rounds):
+        idx = rng.integers(0, n, n)
+        sample = data.iloc[idx]
+        fit = _learn_weights(sample, current)
+        if fit.get("status") == "OK":
+            out.append({row["layer"]: row["suggested"] for row in fit["weights"]})
+    return out
+
+
+def propose_weights(session, horizon: str = "fwd_return_10d",
+                    register_shadow: bool = True) -> dict:
+    """Fit candidate weights, run every validation gate, and register a SHADOW
+    version only if all of them pass.
+
+    Never promotes. Passing the gates earns a candidate the right to be *watched*,
+    not the right to trade.
+    """
+    from app.ai.gates import (evaluate_all, gate_no_sign_flip, gate_oos_improves,
+                              gate_sample_size, gate_stability, gate_turnover)
+    from app.services.conviction_service import LAYER_WEIGHTS
+    from app.services.model_registry import get_champion, register
+
+    frame = _load_frame(session, horizon)
+    n = int(len(frame))
+    current = {layer: LAYER_WEIGHTS[layer] for layer in LAYERS}
+
+    size_gate = gate_sample_size(n)
+    if not size_gate.passed:
+        return {"status": "REJECTED", "n": n,
+                **evaluate_all([size_gate])}
+
+    fit = _learn_weights(frame, current)
+    if fit.get("status") != "OK":
+        return {"status": "REJECTED", "n": n,
+                "note": fit.get("note", "No usable fit."),
+                "gates": [size_gate.to_dict()]}
+
+    candidate = {row["layer"]: row["suggested"] for row in fit["weights"]}
+    coeffs = {row["layer"]: row["coefficient"] for row in fit["weights"]}
+
+    # Champion's recorded OOS IC, if we have one to beat.
+    champion = get_champion(session)
+    champion_ic = ((champion.metrics_json or {}).get("oos_ic")
+                   if champion is not None else None)
+
+    # Ranking churn: score every row under both weight sets and compare order.
+    cur_scores, cand_scores = [], []
+    for _, row in frame.iterrows():
+        cur_scores.append(sum(current[layer] * (row[f"{layer}_strength"] or 0.0)
+                              for layer in LAYERS))
+        cand_scores.append(sum(candidate[layer] * (row[f"{layer}_strength"] or 0.0)
+                               for layer in LAYERS))
+    ic_gain = (fit.get("oos_ic") or 0.0) - (champion_ic or 0.0)
+
+    gates = [
+        size_gate,
+        gate_oos_improves(fit.get("oos_ic"), champion_ic),
+        gate_turnover(cur_scores, cand_scores, ic_gain),
+        gate_no_sign_flip(current, coeffs, n),
+        gate_stability(_bootstrap_weights(frame, current)),
+    ]
+    verdict = evaluate_all(gates)
+
+    result = {"status": "PASSED" if verdict["passed"] else "REJECTED",
+              "n": n, "horizon": horizon, "candidate": candidate,
+              "oos_ic": fit.get("oos_ic"), "champion_oos_ic": champion_ic,
+              **verdict}
+
+    if verdict["passed"] and register_shadow:
+        version = register(
+            session, kind="WEIGHTS",
+            label=f"learned-{horizon}-n{n}", params=candidate,
+            metrics={"oos_ic": fit.get("oos_ic"), "n": n,
+                     "gates": verdict["gates"]},
+            parent_id=champion.id if champion is not None else None,
+            notes="Auto-proposed by the learner; awaiting human promotion.",
+            created_by="learner")
+        result["registered_version_id"] = version.id
+        result["note"] = ("Registered as SHADOW. It will be scored alongside the "
+                          "champion but will not trade until a human promotes it.")
+    return result
+
+
 def calibration_report(session, horizon: str = "fwd_return_10d") -> dict:
     """The whole Phase 2+3 read, safe to call from day one."""
     from app.services.conviction_service import LAYER_WEIGHTS

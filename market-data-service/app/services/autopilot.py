@@ -103,7 +103,15 @@ def run_autopilot(session: Session, settings, place_order=None) -> dict:
                 "note": "Set AUTOPILOT_ENABLED=true to let the Alpha Stack paper-trade."}
 
     from app.models import AutopilotTrade, Symbol
+    from app.services.circuit_breakers import evaluate as check_breakers
     from app.services.conviction_service import alpha_stack
+
+    # Checked before scoring, not after: if the breakers say stop, the score is
+    # not information we should be acting on, so there is no point computing it.
+    breakers = check_breakers(session)
+    if breakers["halted"]:
+        return {"status": "HALTED", "opened": 0,
+                "breakers": breakers, "note": breakers["summary"]}
 
     stack = alpha_stack(session)
     setups = stack.get("setups") or []
