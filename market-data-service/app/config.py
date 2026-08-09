@@ -52,6 +52,23 @@ class Settings(BaseSettings):
     anthropic_price_output_per_mtok: float = 5.0
     usd_to_inr: float = 84.0                # for the ₹ display in the UI
 
+    # --- MetaTrader 5 (Exness FX/crypto), read-only ---
+    # Exness has no retail REST API; we attach to a locally running MT5 terminal
+    # via the MetaTrader5 package (Windows only). Leave login blank to use
+    # whatever account the terminal is already logged into — the normal case.
+    mt5_login: int | None = None
+    mt5_password: str = ""
+    mt5_server: str = ""                    # e.g. "Exness-MT5Real"
+    mt5_terminal_path: str = ""             # optional explicit terminal64.exe path
+
+    # --- paper autopilot (Alpha Stack trades its own signals) ---
+    # OFF by default and PAPER ONLY — there is no live code path. When enabled,
+    # the daily job opens paper positions for setups scoring >= 55 (max 8 open)
+    # so realised P&L can be attributed back to conviction.
+    autopilot_enabled: bool = False
+    # Spring owns the paper book; the autopilot places orders through its API.
+    backend_base_url: str = "http://localhost:8080"
+
     # --- scheduler ---
     scheduler_enabled: bool = True
     sync_cron: str = "30 18 * * 1-5"        # post-market IST, weekdays

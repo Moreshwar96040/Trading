@@ -70,6 +70,30 @@ export const SCREENER_PRESETS: ScreenerPreset[] = [
     conditions: [{ field: 'tenkan_9', op: 'gt', ref: 'kijun_26' }],
   },
 
+  // ---- Support + quality (buy the dip, on a good business) ---------------
+  // "Close to major support" = price sitting just above its most recent 5-bar
+  // swing low (0-5% above it, and not broken below). Paired with quality metrics
+  // so you're buying a dip on a durable business, not catching a falling knife.
+  {
+    name: 'Quality near support',
+    description: 'Within 5% above major support (not broken) on a profitable, low-debt business',
+    conditions: [
+      { field: 'pct_from_support', op: 'gte', value: 0 },
+      { field: 'pct_from_support', op: 'lte', value: 5 },
+      { field: 'roe_pct', op: 'gte', value: 15 },
+      { field: 'debt_to_equity', op: 'lt', value: 1 },
+      { field: 'pe_trailing', op: 'gt', value: 0 },
+    ],
+  },
+  {
+    name: 'At support (any)',
+    description: 'Price within 4% above its nearest major swing-low support',
+    conditions: [
+      { field: 'pct_from_support', op: 'gte', value: 0 },
+      { field: 'pct_from_support', op: 'lte', value: 4 },
+    ],
+  },
+
   // ---- Famous fundamental filters ---------------------------------------
   // Approximations of well-known published screens, expressed over the ratios
   // available on the snapshot. They are starting points, not exact reproductions

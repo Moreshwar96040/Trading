@@ -419,6 +419,24 @@ def portfolio_health_with_live(body: dict | None = None,
     return position_health(session, live_positions=body.get("live_positions"))
 
 
+@router.get("/internal/exness/account")
+def exness_account_endpoint(settings: Settings = Depends(get_settings)) -> dict:
+    """Exness/MT5 account + open FX-crypto positions with a risk action queue.
+    Read-only. Returns a status (UNAVAILABLE / NOT_CONNECTED / ERROR) with a
+    plain explanation rather than failing, so the UI can always render."""
+    from app.services.fx_monitor import exness_account
+    return exness_account(settings)
+
+
+@router.get("/internal/exness/trades")
+def exness_trades_endpoint(days: int = 90,
+                           settings: Settings = Depends(get_settings)) -> dict:
+    """Closed FX/crypto trade analysis: win rate, expectancy, per-symbol P&L and
+    behavioural leaks, computed from the MT5 deal history. Read-only."""
+    from app.services.fx_review import exness_trade_review
+    return exness_trade_review(settings, days=days)
+
+
 @router.post("/internal/portfolio/alpha-review")
 def portfolio_alpha_review_endpoint(body: dict | None = None,
                                     session: Session = Depends(get_session),
@@ -471,6 +489,55 @@ def ai_usage(session: Session = Depends(get_session),
     return {"month": summarize(month), "total": summarize(total),
             "by_kind": [{"kind": r[0], **summarize(r[1:])} for r in by_kind],
             "usd_to_inr": settings.usd_to_inr}
+
+
+@router.post("/internal/conviction/record")
+def conviction_record(session: Session = Depends(get_session),
+                      settings: Settings = Depends(get_settings)) -> dict:
+    """Snapshot today's conviction + layer strengths for every active symbol.
+    This is the training data for adaptive weighting — it cannot be backfilled,
+    so it must run daily."""
+    from app.services.conviction_recorder import record_conviction
+    return record_conviction(session, settings)
+
+
+@router.post("/internal/conviction/label")
+def conviction_label(session: Session = Depends(get_session)) -> dict:
+    """Attach forward returns to conviction rows old enough to have them."""
+    from app.services.conviction_recorder import label_outcomes
+    return label_outcomes(session)
+
+
+@router.get("/internal/conviction/calibration")
+def conviction_calibration(horizon: str = "fwd_return_10d",
+                           session: Session = Depends(get_session)) -> dict:
+    """Is the Alpha Stack predictive, and what weights would the data suggest?
+    Safe from day one — reports COLLECTING until enough labelled rows exist."""
+    from app.ai.calibration import calibration_report
+    allowed = {"fwd_return_5d", "fwd_return_10d", "fwd_return_20d"}
+    if horizon not in allowed:
+        raise HTTPException(status_code=400,
+                            detail=f"horizon must be one of {sorted(allowed)}")
+    return calibration_report(session, horizon=horizon)
+
+
+@router.get("/internal/autopilot/status")
+def autopilot_status_endpoint(session: Session = Depends(get_session),
+                              settings: Settings = Depends(get_settings)) -> dict:
+    """Open autopilot paper trades + realised P&L attributed by conviction band."""
+    from app.services.autopilot import autopilot_status
+    return autopilot_status(session, settings)
+
+
+@router.post("/internal/autopilot/run")
+def autopilot_run(session: Session = Depends(get_session),
+                  settings: Settings = Depends(get_settings)) -> dict:
+    """Open paper trades for today's best setups. Paper only; no-op unless
+    AUTOPILOT_ENABLED=true."""
+    from app.services.autopilot import reconcile_closed, run_autopilot
+    result = run_autopilot(session, settings)
+    result["reconciled"] = reconcile_closed(session)
+    return result
 
 
 @router.post("/internal/ai/train")

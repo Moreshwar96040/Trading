@@ -10,7 +10,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models import AiInsight, ScreenerSnapshot, Strategy, StrategySignal, Symbol
-from app.services.portfolio_monitor import _decide, portfolio_alpha_review
+from app.services.portfolio_monitor import (_decide, _profit_alert, _replacement,
+                                            _stop_alert, portfolio_alpha_review)
 
 
 class _Settings:
@@ -78,6 +79,46 @@ def test_high_conviction_but_deteriorating_does_not_add():
              "close": 100, "breakdown": _bd(technical=0.9)}
     # deteriorating news blocks ADD and routes to TRIM instead
     assert _decide(setup, {"direction": "deteriorating"}, {"avg_cost": 90})["action"] == "TRIM"
+
+
+# ---------- proactive signals (pure) ----------
+
+def test_profit_alert_only_when_up_and_fading():
+    # up a lot but everything still strong -> ride it, no alert
+    assert _profit_alert(30, conviction=80, trend="improving", rsi=55) is None
+    # up and conviction fading -> book/trim
+    assert _profit_alert(30, conviction=48, trend="stable", rsi=55) is not None
+    # up and overbought -> book/trim
+    msg = _profit_alert(22, conviction=70, trend="stable", rsi=78)
+    assert msg and "RSI" in msg
+    # not up enough -> never
+    assert _profit_alert(5, conviction=40, trend="deteriorating", rsi=80) is None
+
+
+def test_stop_alert_near_set_stop_is_urgent():
+    a = _stop_alert(pnl_pct=2, close=101, atr=3, sma200=90, stop_price=100)
+    assert a and a["urgent"] is True            # 1% above the stop
+    assert _stop_alert(pnl_pct=5, close=120, atr=3, sma200=90, stop_price=100) is None
+
+
+def test_stop_alert_suggests_line_when_no_stop_and_bleeding():
+    a = _stop_alert(pnl_pct=-12, close=90, atr=4, sma200=95, stop_price=None)
+    assert a is not None and "Suggested stop" in a["text"]
+    # healthy, no stop -> nothing to nag about
+    assert _stop_alert(pnl_pct=6, close=110, atr=4, sma200=95, stop_price=None) is None
+
+
+def test_replacement_prefers_same_sector_high_conviction():
+    cands = [
+        {"ticker": "TCS", "name": "TCS", "sector": "IT", "conviction": 78, "news_veto": False},
+        {"ticker": "SUN", "name": "Sun", "sector": "Pharma", "conviction": 90, "news_veto": False},
+        {"ticker": "HELD", "name": "Held", "sector": "IT", "conviction": 95, "news_veto": False},
+    ]
+    rep = _replacement("IT", cands, held={"HELD"})
+    assert rep["ticker"] == "TCS"               # same sector, not held, best eligible
+    assert rep["same_sector"] is True
+    # no eligible names -> None
+    assert _replacement("IT", [], held=set()) is None
 
 
 # ---------- end to end ----------

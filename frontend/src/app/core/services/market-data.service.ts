@@ -5,10 +5,12 @@ import { shareReplay } from 'rxjs/operators';
 
 import { environment } from '../../../environments/environment';
 import {
-  AiPredictionRow, AiRiskPlan, AiUsageSummary, AlertInfo, AlphaStack, BacktestDetail,
+  AiPredictionRow, AiRiskPlan, AiUsageSummary, AlertInfo, AlphaStack, AutopilotStatus,
+  BacktestDetail,
   BacktestRunParams, CandleSeries,
-  DataHealth, EdgeGatesReport,
-  FundamentalsData, GuardianReport, IndicatorSeries, InsightResponse, JournalEntry,
+  ConvictionCalibration, DataHealth, EdgeGatesReport,
+  FundamentalsData, FxAccountReport, FxTradeReview, GuardianReport, IndicatorSeries,
+  InsightResponse, JournalEntry,
   LeaksReport, LiveHolding, MarketNewsResponse, MomentumBoard, MorningBriefing,
   PortfolioAlphaReview,
   NewsRefreshResult, NewsResponse, PaperAccount, PaperOrder, RegimeInfo,
@@ -260,6 +262,17 @@ export class MarketDataService {
     return this.http.get<LeaksReport>(`${this.base}/review/leaks`);
   }
 
+  /** Paper autopilot: open trades + realised P&L by conviction band. */
+  getAutopilotStatus(): Observable<AutopilotStatus> {
+    return this.http.get<AutopilotStatus>(`${this.base}/autopilot/status`);
+  }
+
+  /** Has the Alpha Stack's own history validated its weights? */
+  getConvictionCalibration(horizon = 'fwd_return_10d'): Observable<ConvictionCalibration> {
+    return this.http.get<ConvictionCalibration>(`${this.base}/conviction/calibration`,
+                                                { params: { horizon } });
+  }
+
   getAiUsage(): Observable<AiUsageSummary> {
     return this.http.get<AiUsageSummary>(`${this.base}/ai/usage`);
   }
@@ -295,6 +308,17 @@ export class MarketDataService {
   getAlphaStack(ticker?: string): Observable<AlphaStack> {
     const params = ticker ? new HttpParams().set('ticker', ticker) : new HttpParams();
     return this.http.get<AlphaStack>(`${this.base}/alpha/stack`, { params });
+  }
+
+  /** Exness/MT5 FX-crypto account, positions and risk actions (read-only). */
+  getExnessAccount(): Observable<FxAccountReport> {
+    return this.http.get<FxAccountReport>(`${this.base}/exness/account`);
+  }
+
+  /** Closed FX/crypto trade analysis (win rate, expectancy, leaks). */
+  getExnessTrades(days = 90): Observable<FxTradeReview> {
+    return this.http.get<FxTradeReview>(`${this.base}/exness/trades`,
+                                        { params: { days } });
   }
 
   getPortfolioAlphaReview(): Observable<PortfolioAlphaReview> {

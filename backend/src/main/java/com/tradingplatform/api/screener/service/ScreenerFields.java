@@ -47,6 +47,10 @@ public final class ScreenerFields {
             Map.entry("tk_cross_age_days", "tkCrossAgeDays"),
             Map.entry("pct_above_cloud", "pctAboveCloud"),
             Map.entry("ichimoku_bullish", "ichimokuBullish"),
+            // Major swing support (V18): "coiled near support" is
+            //   pct_from_support gte 0  +  pct_from_support lte 5
+            Map.entry("support", "support"),
+            Map.entry("pct_from_support", "pctFromSupport"),
             // fundamentals (denormalized onto the snapshot in Phase 3)
             Map.entry("market_cap", "marketCap"),
             Map.entry("pe_trailing", "peTrailing"),

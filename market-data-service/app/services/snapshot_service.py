@@ -97,6 +97,29 @@ def _ichimoku_fields(high: pd.Series, low: pd.Series, close: pd.Series) -> dict:
     }
 
 
+#: Fractal width for "major" support: a 5-bar pivot (5 left + 5 right) ignores
+#: minor intraday wiggles and only marks swings that actually held for a week+.
+SUPPORT_FRACTAL = 5
+
+
+def _support_fields(high: pd.Series, low: pd.Series, close: pd.Series) -> dict:
+    """Nearest confirmed major support below price, and how far above it we sit.
+
+    `support` is the most recent 5-bar swing low, forward-filled and lagged so it's
+    known without lookahead (see core.support_resistance). `pct_from_support` is
+    price's distance ABOVE that level: small positive = coiled near support (the
+    buy-the-dip zone), negative = support broken.
+    """
+    sr = core.support_resistance(high, low, left=SUPPORT_FRACTAL, right=SUPPORT_FRACTAL)
+    support = sr["support"].iloc[-1]
+    if support is None or pd.isna(support) or float(support) <= 0:
+        return {"support": None, "pct_from_support": None}
+    support = round(float(support), 4)
+    c = float(close.iloc[-1])
+    return {"support": support,
+            "pct_from_support": round((c / support - 1) * 100.0, 4)}
+
+
 def compute_snapshot_row(df: pd.DataFrame) -> dict | None:
     """Latest indicator values from an OHLCV frame (ascending by date)."""
     if len(df) < MIN_ROWS:
@@ -122,6 +145,7 @@ def compute_snapshot_row(df: pd.DataFrame) -> dict | None:
 
     return {
         **_ichimoku_fields(high, low, close),
+        **_support_fields(high, low, close),
         "as_of_date": df["trade_date"].iloc[last],
         "close": round(c, 4),
         "change_1d_pct": _pct(c, prev_c),

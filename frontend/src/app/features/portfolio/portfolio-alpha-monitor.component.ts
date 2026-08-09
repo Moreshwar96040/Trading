@@ -77,6 +77,19 @@ import { MarketDataService } from '../../core/services/market-data.service';
                     @if (r.trend === 'deteriorating') { <mat-icon class="trend down">trending_down</mat-icon> }
                   </div>
                   <p class="why">{{ r.rationale }}</p>
+                  @for (a of r.alerts; track a.kind) {
+                    <p [class]="'alert ' + a.kind.toLowerCase() + (a.urgent ? ' urgent' : '')">
+                      <mat-icon>{{ a.kind === 'STOP' ? 'shield' : 'savings' }}</mat-icon>
+                      {{ a.text }}
+                    </p>
+                  }
+                  @if (r.replacement; as rep) {
+                    <a class="swap" [routerLink]="['/alpha']" [queryParams]="{ ticker: rep.ticker }"
+                       [matTooltip]="'Open the Alpha Stack read for ' + rep.ticker">
+                      <mat-icon>swap_horiz</mat-icon>
+                      Rotate into <b>{{ rep.ticker }}</b> ({{ rep.conviction }}/100@if (rep.same_sector) { · same sector })
+                    </a>
+                  }
                 </div>
                 <span class="qty">{{ r.quantity }} sh</span>
               </div>
@@ -138,6 +151,20 @@ import { MarketDataService } from '../../core/services/market-data.service';
     .trend.up { color: var(--up); }
     .trend.down { color: var(--down); }
     .why { margin: 3px 0 0; font-size: 12px; color: var(--text-dim); line-height: 1.45; }
+    .alert { display: flex; align-items: flex-start; gap: 5px; margin: 5px 0 0;
+             font-size: 12px; line-height: 1.4; }
+    .alert mat-icon { font-size: 15px; width: 15px; height: 15px; margin-top: 1px;
+                      flex-shrink: 0; }
+    .alert.profit { color: var(--up); }
+    .alert.stop { color: #ffb74d; }
+    .alert.stop.urgent { color: var(--down); font-weight: 500; }
+    .swap { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px;
+            font-size: 12px; color: var(--accent-2); text-decoration: none;
+            padding: 3px 10px; border-radius: 999px; border: 1px solid rgba(129,140,248,0.3);
+            width: fit-content; }
+    .swap:hover { background: rgba(129,140,248,0.12); }
+    .swap mat-icon { font-size: 15px; width: 15px; height: 15px; }
+    .swap b { font-weight: 700; }
     .qty { font-size: 11px; color: var(--text-dim); flex-shrink: 0;
            font-variant-numeric: tabular-nums; }
     .disclaimer { font-size: 11px; opacity: 0.5; margin: 12px 0 0; }

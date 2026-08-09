@@ -150,6 +150,8 @@ export class ScreenerPageComponent implements OnInit {
     // "Cloud %" = how far price sits above the cloud top.
     { key: 'tkCrossAgeDays', label: 'TK age', numeric: true, signed: false },
     { key: 'pctAboveCloud', label: 'Cloud %', numeric: true, signed: true },
+    // "Supp %" = how far price sits above its major support (small = near support).
+    { key: 'pctFromSupport', label: 'Supp %', numeric: true, signed: true },
   ] as const;
   readonly columnKeys = this.columns.map((c) => c.key);
 

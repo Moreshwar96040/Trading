@@ -22,6 +22,7 @@ import {
   LiveHolding, PaperAccount, PaperOrder, SymbolInfo, UpstoxStatus,
 } from '../../core/models/market-data.models';
 import { MarketDataService } from '../../core/services/market-data.service';
+import { ExnessAccountComponent } from './exness-account.component';
 import { PortfolioAlphaMonitorComponent } from './portfolio-alpha-monitor.component';
 
 @Component({
@@ -30,7 +31,8 @@ import { PortfolioAlphaMonitorComponent } from './portfolio-alpha-monitor.compon
   imports: [CommonModule, FormsModule, ReactiveFormsModule, MatCardModule, MatButtonModule,
             MatButtonToggleModule, MatCheckboxModule, MatFormFieldModule, MatInputModule,
             MatAutocompleteModule, MatIconModule, MatTableModule, MatProgressSpinnerModule,
-            MatSnackBarModule, MatTabsModule, MatTooltipModule, PortfolioAlphaMonitorComponent],
+            MatSnackBarModule, MatTabsModule, MatTooltipModule,
+            PortfolioAlphaMonitorComponent, ExnessAccountComponent],
   template: `
     <h2 class="page-title">Portfolio</h2>
 
@@ -346,6 +348,21 @@ import { PortfolioAlphaMonitorComponent } from './portfolio-alpha-monitor.compon
 
         </div>
       </mat-tab>
+
+      <!-- ======================= FX / CRYPTO (EXNESS · MT5) ======================= -->
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <mat-icon class="tab-ic">currency_exchange</mat-icon> FX &amp; Crypto · Exness
+        </ng-template>
+        <div class="tab-body">
+          <div class="head-note fx-note">
+            <mat-icon>info</mat-icon>
+            <span class="muted">Risk monitoring only — conviction scoring is built on
+              equity fundamentals and NSE breadth, which don't apply to FX or crypto.</span>
+          </div>
+          <app-exness-account />
+        </div>
+      </mat-tab>
     </mat-tab-group>
   `,
   styles: `
@@ -364,6 +381,8 @@ import { PortfolioAlphaMonitorComponent } from './portfolio-alpha-monitor.compon
     .head-note { display: flex; align-items: center; gap: 8px; }
     .head-note mat-icon { color: var(--accent); font-size: 20px; width: 20px; height: 20px; }
     .head-note .muted { font-size: 13px; }
+    .fx-note { margin-bottom: 16px; }
+    .fx-note mat-icon { color: #ffb74d; }
 
     .header-row { display: flex; justify-content: space-between; align-items: center;
                   gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }

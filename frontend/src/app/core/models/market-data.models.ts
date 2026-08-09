@@ -61,6 +61,9 @@ export interface ScreenRow {
   tkCrossAgeDays: number | null;
   pctAboveCloud: number | null;
   ichimokuBullish: number | null;
+  /** Major swing support level and price's % distance above it (negative = broken). */
+  support: number | null;
+  pctFromSupport: number | null;
 }
 
 export interface ScreenerFieldsMeta {
@@ -379,9 +382,14 @@ export interface HoldingReview {
   news_veto?: boolean;
   news_score?: number | null;
   trend?: 'improving' | 'deteriorating' | 'stable' | null;
+  rsi?: number | null;
   action: 'ADD' | 'HOLD' | 'TRIM' | 'SELL' | 'UNKNOWN';
   rationale: string;
   pnl_pct: number | null;
+  /** Proactive management: stop-loss / profit-booking prompts, and a swap idea. */
+  alerts?: { kind: 'STOP' | 'PROFIT'; text: string; urgent?: boolean }[];
+  replacement?: { ticker: string; name: string; sector: string | null;
+                  conviction: number; same_sector: boolean } | null;
 }
 
 export interface PortfolioAlphaReview {
@@ -389,7 +397,62 @@ export interface PortfolioAlphaReview {
   note?: string;
   reviews?: HoldingReview[];
   summary?: { holdings: number; sell: number; trim: number; hold: number; add: number;
-              action_needed: number };
+              alerts: number; action_needed: number };
+}
+
+/** Exness / MetaTrader 5 FX-crypto account (read-only). */
+export interface FxPosition {
+  ticket: number | null;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  volume: number;
+  price_open: number;
+  price_current: number;
+  stop_loss: number | null;
+  take_profit: number | null;
+  profit: number;
+  swap: number;
+  pnl_pct: number | null;
+  comment: string | null;
+}
+
+export interface FxAccountReport {
+  status: 'OK' | 'UNAVAILABLE' | 'NOT_CONNECTED' | 'ERROR';
+  note?: string;
+  account?: {
+    login: number | null; server: string | null; currency: string | null;
+    balance: number; equity: number; margin: number; margin_free: number;
+    margin_level: number; profit: number; leverage: number | null;
+  };
+  positions?: FxPosition[];
+  actions?: { severity: 'high' | 'medium' | 'info'; kind: string;
+              symbol: string | null; text: string }[];
+  summary?: { open_positions: number; high_priority: number;
+              without_stop: number; floating_pnl: number };
+}
+
+/** Closed FX/crypto trade analysis from the MT5 deal history. */
+export interface FxTradeReview {
+  status: 'OK' | 'NO_TRADES' | 'UNAVAILABLE' | 'NOT_CONNECTED' | 'ERROR';
+  note?: string;
+  days?: number;
+  stats?: {
+    trades: number; wins: number; losses: number; win_rate_pct: number;
+    net: number; gross_profit: number; gross_loss: number;
+    profit_factor: number | null; expectancy: number;
+    avg_win: number | null; avg_loss: number | null; payoff_ratio: number | null;
+    swap_total: number; commission_total: number;
+    avg_hold_hours_win: number | null; avg_hold_hours_loss: number | null;
+    best: number; worst: number;
+  };
+  symbols?: { symbol: string; trades: number; net: number;
+              win_rate_pct: number; volume: number }[];
+  leaks?: { severity: 'high' | 'medium' | 'info'; kind: string; text: string }[];
+  trades?: { position_id: number; symbol: string; side: 'BUY' | 'SELL';
+             volume: number; price_open: number; price_close: number;
+             profit: number; commission: number; swap: number; net: number;
+             opened_at: string | null; closed_at: string | null;
+             hold_hours: number | null }[];
 }
 
 export interface MorningBriefing {
@@ -410,6 +473,45 @@ export interface MorningBriefing {
     error?: string;
     cached?: boolean;
   } | null;
+}
+
+/** Adaptive conviction: has the Alpha Stack's own history validated its weights? */
+export interface ConvictionCalibration {
+  status: 'OK' | 'COLLECTING';
+  note?: string;
+  n: number;
+  needed?: number;
+  horizon?: string;
+  date_from?: string;
+  date_to?: string;
+  conviction_ic?: number | null;
+  layer_ic?: { layer: string; ic: number | null; n: number; t_stat?: number | null;
+               significant: boolean; note?: string | null }[];
+  calibration?: { band: string; n: number; avg_return: number | null;
+                  median_return?: number; hit_rate: number | null }[];
+  veto_audit?: { n: number; avg_return_vetoed?: number; avg_return_other?: number | null;
+                 verdict?: string; note?: string };
+  weights?: {
+    status: 'OK' | 'INSUFFICIENT' | 'NO_SIGNAL';
+    n: number; needed?: number; oos_ic?: number | null; shrinkage?: number; note?: string;
+    weights?: { layer: string; current: number; learned_raw: number;
+                suggested: number; delta: number; coefficient: number }[];
+  };
+  generated_at?: string;
+}
+
+/** Paper autopilot: the Alpha Stack trading its own signals, graded on money. */
+export interface AutopilotStatus {
+  enabled: boolean;
+  min_conviction: number;
+  max_positions: number;
+  open: { ticker: string; entry_date: string; entry_price: number | null;
+          quantity: number; conviction: number; stop_price: number | null }[];
+  closed_count: number;
+  net: number;
+  by_band: { band: string; trades: number; net: number; win_rate_pct: number | null;
+             avg_return_pct: number | null; expectancy?: number }[];
+  generated_at?: string;
 }
 
 export interface AiUsageBucket {

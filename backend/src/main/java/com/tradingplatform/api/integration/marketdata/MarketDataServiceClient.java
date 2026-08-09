@@ -255,6 +255,53 @@ public class MarketDataServiceClient {
         }
     }
 
+    /** Exness/MT5 FX-crypto account + positions with risk actions (read-only). */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getExnessAccount() {
+        try {
+            return http.get().uri("/internal/exness/account").retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Exness/MT5 service unavailable", ex);
+        }
+    }
+
+    /** Paper autopilot: open trades + realised P&amp;L attributed by conviction band. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getAutopilotStatus() {
+        try {
+            return http.get().uri("/internal/autopilot/status").retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Autopilot service unavailable", ex);
+        }
+    }
+
+    /** Adaptive conviction: is the Alpha Stack predictive, and what weights
+     *  would its own history suggest? Reports COLLECTING until enough data. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getConvictionCalibration(String horizon) {
+        try {
+            return http.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/conviction/calibration")
+                            .queryParam("horizon", horizon).build())
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Calibration service unavailable", ex);
+        }
+    }
+
+    /** Closed FX/crypto trade analysis from the MT5 deal history (read-only). */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getExnessTrades(int days) {
+        try {
+            return http.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/exness/trades")
+                            .queryParam("days", days).build())
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Exness/MT5 trade review unavailable", ex);
+        }
+    }
+
     /** Alpha Monitor: score each held stock through the Alpha Stack and recommend
      *  ADD / HOLD / TRIM / SELL. Live broker holdings ride in the body. */
     @SuppressWarnings("unchecked")

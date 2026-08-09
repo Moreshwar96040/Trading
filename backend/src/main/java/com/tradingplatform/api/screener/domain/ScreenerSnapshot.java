@@ -122,6 +122,14 @@ public class ScreenerSnapshot {
     @Column(name = "ichimoku_bullish")
     private BigDecimal ichimokuBullish;
 
+    // --- major swing support (V18) ---
+    @Column(name = "support")
+    private BigDecimal support;
+
+    /** Price's % distance above the nearest major support; negative = broken. */
+    @Column(name = "pct_from_support")
+    private BigDecimal pctFromSupport;
+
     // --- fundamentals, denormalized by the Python snapshot refresher (V4) ---
 
     @Column(name = "market_cap")
@@ -184,6 +192,8 @@ public class ScreenerSnapshot {
     public BigDecimal getTkCrossAgeDays() { return tkCrossAgeDays; }
     public BigDecimal getPctAboveCloud() { return pctAboveCloud; }
     public BigDecimal getIchimokuBullish() { return ichimokuBullish; }
+    public BigDecimal getSupport() { return support; }
+    public BigDecimal getPctFromSupport() { return pctFromSupport; }
     public BigDecimal getMarketCap() { return marketCap; }
     public BigDecimal getPeTrailing() { return peTrailing; }
     public BigDecimal getPb() { return pb; }

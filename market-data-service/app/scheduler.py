@@ -32,6 +32,32 @@ def _run_sync_job() -> None:
         from app.services.signal_service import evaluate_signals
         sig = evaluate_signals(session)
         log.info("Strategy signals evaluated: %d fired", sig["signals"])
+
+        # Adaptive conviction: record today's scores, then label whatever has
+        # matured. Runs LAST so it scores against a fresh snapshot and signals.
+        # This history cannot be backfilled — a missed run is data lost forever,
+        # so it is wrapped separately rather than sharing the outer try.
+        try:
+            from app.services.conviction_recorder import (label_outcomes,
+                                                          record_conviction)
+            rec = record_conviction(session, settings)
+            lab = label_outcomes(session)
+            log.info("Conviction: %d recorded, %d skipped, %d newly labelled",
+                     rec["recorded"], rec["skipped"], lab["labelled"])
+        except Exception:                      # noqa: BLE001 — never fail the sync
+            log.exception("Conviction recording failed (sync itself succeeded)")
+
+        # Paper autopilot — no-op unless explicitly enabled. Isolated for the same
+        # reason: a rejected order must never take the sync down with it.
+        try:
+            from app.services.autopilot import reconcile_closed, run_autopilot
+            auto = run_autopilot(session, settings)
+            if auto.get("status") == "OK":
+                closed = reconcile_closed(session)
+                log.info("Autopilot: %d opened, %d closed", auto["opened"],
+                         closed["closed"])
+        except Exception:                      # noqa: BLE001
+            log.exception("Autopilot run failed (sync itself succeeded)")
     except Exception:
         log.exception("Scheduled sync crashed")
     finally:

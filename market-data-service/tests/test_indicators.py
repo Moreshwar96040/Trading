@@ -172,3 +172,37 @@ def test_snapshot_row_exposes_ichimoku_fields():
     for field in ("tenkan_9", "kijun_26", "cloud_top", "cloud_bottom",
                   "tk_cross_age_days", "pct_above_cloud", "ichimoku_bullish"):
         assert field in row, field
+
+
+# ---------- major support screener fields ----------
+
+def test_support_fields_flag_price_coiled_near_swing_low():
+    import numpy as np
+    from app.services.snapshot_service import _support_fields
+    vals = np.concatenate([np.linspace(150, 100, 15),   # fall to a swing low ~100
+                           np.linspace(100, 130, 10),   # bounce (confirms the low)
+                           np.linspace(130, 104, 8)])    # pull back near it
+    close = pd.Series(vals)
+    f = _support_fields(close * 1.01, close * 0.99, close)
+    assert f["support"] is not None
+    assert 0 <= f["pct_from_support"] <= 8            # just above support
+
+
+def test_support_none_in_pure_uptrend_with_no_recent_swing_low():
+    import numpy as np
+    from app.services.snapshot_service import _support_fields
+    up = pd.Series(np.linspace(100, 200, 40))
+    assert _support_fields(up * 1.01, up * 0.99, up)["support"] is None
+
+
+def test_snapshot_row_exposes_support_fields():
+    from datetime import date
+    import numpy as np
+    from app.services.snapshot_service import compute_snapshot_row
+    vals = np.concatenate([np.linspace(150, 100, 15), np.linspace(100, 130, 10),
+                           np.linspace(130, 104, 8)])
+    df = pd.DataFrame({"trade_date": [date(2026, 1, 1)] * len(vals),
+                       "open": vals, "high": vals * 1.01, "low": vals * 0.99,
+                       "close": vals, "volume": np.full(len(vals), 1000)})
+    row = compute_snapshot_row(df)
+    assert "support" in row and "pct_from_support" in row

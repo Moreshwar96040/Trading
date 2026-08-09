@@ -40,6 +40,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { path: '/strategies', icon: 'science', title: 'Strategy Lab' },
       { path: '/alpha', icon: 'layers', title: 'Alpha Stack' },
+      { path: '/ai', icon: 'psychology', title: 'AI & ML' },
     ],
   },
   {

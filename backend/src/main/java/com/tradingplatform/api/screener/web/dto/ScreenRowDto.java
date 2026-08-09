@@ -12,7 +12,9 @@ public record ScreenRowDto(String ticker, String name, String sector, LocalDate 
                            // Ichimoku: shown so a cloud-breakout screen is readable
                            // at a glance without opening each chart.
                            BigDecimal tkCrossAgeDays, BigDecimal pctAboveCloud,
-                           BigDecimal ichimokuBullish) {
+                           BigDecimal ichimokuBullish,
+                           // Major swing support: level + % distance above it.
+                           BigDecimal support, BigDecimal pctFromSupport) {
 
     public static ScreenRowDto from(ScreenerSnapshot s) {
         return new ScreenRowDto(s.getSymbol().getTicker(), s.getSymbol().getName(),
@@ -20,6 +22,6 @@ public record ScreenRowDto(String ticker, String name, String sector, LocalDate 
                 s.getVolumeRatio(), s.getRsi14(), s.getSma50(), s.getSma200(),
                 s.getPctFrom52wHigh(), s.getReturn1mPct(), s.getReturn3mPct(),
                 s.getReturn1yPct(), s.getTkCrossAgeDays(), s.getPctAboveCloud(),
-                s.getIchimokuBullish());
+                s.getIchimokuBullish(), s.getSupport(), s.getPctFromSupport());
     }
 }

@@ -64,7 +64,8 @@ def _collect_holdings(session: Session, live_positions: list[dict] | None) -> li
         holdings[ticker] = {                       # live overrides paper for the same name
             "ticker": ticker, "quantity": int(lp["quantity"]),
             "avg_cost": float(lp.get("avg_cost") or 0),
-            "last_price": lp.get("last_price"), "source": "LIVE"}
+            "last_price": lp.get("last_price"),
+            "stop_price": lp.get("stop_price"), "source": "LIVE"}
     return list(holdings.values())
 
 
@@ -119,6 +120,79 @@ def _decide(setup: dict, trend: dict, holding: dict) -> dict:
             "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None}
 
 
+# --- proactive management: not just "what", but "act now" --------------------
+PROFIT_BOOK_PCT = 15.0      # a gain worth protecting once momentum stalls
+STRETCHED_RSI = 70.0        # overbought — mean reversion risk
+DRAWDOWN_ALERT_PCT = -8.0   # a loss deep enough to demand a stop decision
+NEAR_STOP_PCT = 3.0         # within this % of a set stop = decide before the open
+ATR_STOP_MULT = 2.5         # suggested risk line = close - mult x ATR
+
+
+def _profit_alert(pnl_pct, conviction, trend, rsi) -> str | None:
+    """Book/trim when you're up AND the edge that got you there is fading."""
+    if pnl_pct is None or pnl_pct < PROFIT_BOOK_PCT:
+        return None
+    reasons = []
+    if conviction is not None and conviction < TRIM_BELOW:
+        reasons.append("conviction fading")
+    if trend == "deteriorating":
+        reasons.append("news softening")
+    if rsi is not None and rsi >= STRETCHED_RSI:
+        reasons.append(f"RSI {rsi:.0f} stretched")
+    if not reasons:
+        return None
+    return (f"Up {pnl_pct:.0f}% and {', '.join(reasons)} — "
+            "consider booking or trimming into strength.")
+
+
+def _stop_alert(pnl_pct, close, atr, sma200, stop_price) -> dict | None:
+    """Near a set stop, or bleeding with no stop — surface the risk line."""
+    if close is None:
+        return None
+    suggested = round(close - ATR_STOP_MULT * atr, 2) if atr else None
+
+    if stop_price is not None and stop_price > 0:
+        if close <= stop_price:
+            return {"text": f"At/below your ₹{stop_price:g} stop — honour it or "
+                            "consciously re-underwrite the trade.", "urgent": True}
+        dist = (close / stop_price - 1) * 100.0
+        if dist <= NEAR_STOP_PCT:
+            return {"text": f"{dist:.1f}% above your ₹{stop_price:g} stop — "
+                            "decide before the next open.", "urgent": True}
+        return None
+
+    below_200 = sma200 is not None and close < sma200
+    deep_loss = pnl_pct is not None and pnl_pct <= DRAWDOWN_ALERT_PCT
+    if not (below_200 or deep_loss):
+        return None
+    bits = []
+    if deep_loss:
+        bits.append(f"down {pnl_pct:.0f}%")
+    if below_200:
+        bits.append("below its 200-day")
+    text = "No stop set and " + " and ".join(bits) + "."
+    if suggested:
+        text += f" Suggested stop ₹{suggested:g} ({(suggested / close - 1) * 100:.0f}%)."
+    return {"text": text, "urgent": deep_loss}
+
+
+def _replacement(sector: str | None, candidates: list[dict], held: set[str]):
+    """The best live Alpha Stack setup to rotate INTO — same sector first (keeps
+    the book's shape), then the strongest available name. Never a held ticker,
+    never a vetoed one."""
+    def ok(c: dict) -> bool:
+        return (c["ticker"] not in held and not c.get("news_veto")
+                and c["conviction"] >= TRIM_BELOW)
+    same = [c for c in candidates if ok(c) and c.get("sector") == sector]
+    pool = same or [c for c in candidates if ok(c)]
+    if not pool:
+        return None
+    best = max(pool, key=lambda c: c["conviction"])
+    return {"ticker": best["ticker"], "name": best["name"],
+            "sector": best.get("sector"), "conviction": best["conviction"],
+            "same_sector": bool(same)}
+
+
 def portfolio_alpha_review(session: Session, settings,
                            live_positions: list[dict] | None = None) -> dict:
     """Score every held stock through the Alpha Stack and recommend an action."""
@@ -155,6 +229,24 @@ def portfolio_alpha_review(session: Session, settings,
     for r in sig_rows:
         sig_by_symbol.setdefault(r["symbol_id"], []).append(dict(r))
 
+    # Snapshot metrics (RSI, ATR, 200-day) for the stop / profit reads.
+    from app.models import ScreenerSnapshot
+    snap_by_id = {row.symbol_id: row for row in session.execute(
+        select(ScreenerSnapshot.symbol_id, ScreenerSnapshot.close,
+               ScreenerSnapshot.atr_14, ScreenerSnapshot.rsi_14,
+               ScreenerSnapshot.sma_200)
+        .where(ScreenerSnapshot.symbol_id.in_([m["symbol_id"] for m in meta.values()]))
+    ).all()} if meta else {}
+
+    # Candidate pool for replacement suggestions: the ranked live Alpha Stack.
+    held_tickers = {h["ticker"] for h in holdings}
+    try:
+        from app.services.conviction_service import alpha_stack
+        candidates = alpha_stack(session).get("setups", [])
+    except Exception:                              # noqa: BLE001 — replacement is a bonus
+        log.warning("Replacement candidates unavailable", exc_info=True)
+        candidates = []
+
     reviews, counts = [], {"SELL": 0, "TRIM": 0, "HOLD": 0, "ADD": 0}
     for h in holdings:
         m = meta.get(h["ticker"])
@@ -172,16 +264,39 @@ def portfolio_alpha_review(session: Session, settings,
         trend = sentiment_trend(session, m["symbol_id"])
         decision = _decide(setup, trend, h)
         counts[decision["action"]] += 1
+
+        # -- proactive management signals --
+        snap = snap_by_id.get(m["symbol_id"])
+        close = setup.get("close")
+        atr = float(snap.atr_14) if snap is not None and snap.atr_14 is not None else None
+        rsi = float(snap.rsi_14) if snap is not None and snap.rsi_14 is not None else None
+        sma200 = float(snap.sma_200) if snap is not None and snap.sma_200 is not None else None
+        pnl_pct = decision["pnl_pct"]
+
+        alerts = []
+        stop = _stop_alert(pnl_pct, close, atr, sma200, h.get("stop_price"))
+        if stop:
+            alerts.append({"kind": "STOP", **stop})
+        profit = _profit_alert(pnl_pct, setup["conviction"], trend.get("direction"), rsi)
+        if profit:
+            alerts.append({"kind": "PROFIT", "text": profit, "urgent": False})
+
+        replacement = (_replacement(m["sector"], candidates, held_tickers)
+                       if decision["action"] in ("SELL", "TRIM") else None)
+
         reviews.append({
             "ticker": m["ticker"], "name": m["name"], "sector": m["sector"],
             "quantity": h["quantity"], "avg_cost": h["avg_cost"], "source": h["source"],
-            "close": setup.get("close"),
+            "close": close, "rsi": round(rsi, 1) if rsi is not None else None,
             "conviction": setup["conviction"], "verdict": setup["verdict"],
             "news_veto": setup["news_veto"], "news_score": setup.get("news_score"),
             "trend": trend.get("direction"),
+            "alerts": alerts, "replacement": replacement,
             **decision})
 
     reviews.sort(key=lambda r: URGENCY_RANK.get(r["action"], 4))
+    alerts_total = sum(len(r.get("alerts", [])) for r in reviews)
     return {"status": "OK", "reviews": reviews,
             "summary": {"holdings": len(reviews), **{k.lower(): v for k, v in counts.items()},
+                        "alerts": alerts_total,
                         "action_needed": counts["SELL"] + counts["TRIM"] + counts["ADD"]}}

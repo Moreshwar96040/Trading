@@ -99,6 +99,9 @@ class ScreenerSnapshot(Base):
     tk_cross_age_days: Mapped[int | None] = mapped_column(Integer)
     pct_above_cloud: Mapped[float | None] = mapped_column(Numeric(10, 4))
     ichimoku_bullish: Mapped[int | None] = mapped_column(Integer)
+    # Major swing support (V18): support level + price's % distance above it.
+    support: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    pct_from_support: Mapped[float | None] = mapped_column(Numeric(10, 4))
     # denormalized fundamentals (V4) — kept in sync by the snapshot refresher
     market_cap: Mapped[float | None] = mapped_column(Numeric(22, 2))
     pe_trailing: Mapped[float | None] = mapped_column(Numeric(12, 4))
@@ -242,6 +245,96 @@ class Alert(Base):
                                                         server_default=func.now())
     triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     triggered_value: Mapped[float | None] = mapped_column(Numeric(18, 4))
+
+
+class ConvictionHistory(Base):
+    """One scored setup on one day + its eventual forward return (V19).
+
+    The training set for adaptive weighting: features are the seven layer
+    strengths recorded at scoring time, labels are forward returns filled in
+    later by the labeller. Recorded for every active symbol (not just signalled
+    ones) so the technical layer has enough variance to be identifiable.
+    """
+    __tablename__ = "conviction_history"
+
+    symbol_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("symbols.id", ondelete="CASCADE"),
+                                           primary_key=True)
+    as_of_date: Mapped[date] = mapped_column(Date, primary_key=True)
+
+    conviction: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False)
+    verdict: Mapped[str] = mapped_column(String(16), nullable=False)
+    risk_multiplier: Mapped[float | None] = mapped_column(Numeric(6, 3))
+    news_veto: Mapped[bool] = mapped_column(Boolean, default=False)
+    has_live_signal: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    technical_strength: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    quality_strength: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    news_strength: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    momentum_strength: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    ml_strength: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    macro_strength: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    regime_strength: Mapped[float | None] = mapped_column(Numeric(6, 4))
+
+    regime_code: Mapped[str | None] = mapped_column(String(16))
+    sector: Mapped[str | None] = mapped_column(String(60))
+    atr_pct: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    data_quality: Mapped[float | None] = mapped_column(Numeric(6, 3))
+    close: Mapped[float | None] = mapped_column(Numeric(14, 4))
+
+    fwd_return_5d: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    fwd_return_10d: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    fwd_return_20d: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    mfe_pct: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    mae_pct: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    labelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
+                                                         server_default=func.now())
+
+
+class AutopilotTrade(Base):
+    """A paper trade the autopilot opened, plus the conviction that justified it (V20).
+
+    Carries a COPY of the layer strengths at entry so realised P&L can be attributed
+    to the score as it was, independent of conviction_history retention.
+    """
+    __tablename__ = "autopilot_trades"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    symbol_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("symbols.id", ondelete="CASCADE"),
+                                           nullable=False)
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    entry_price: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    stop_price: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    target_price: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    paper_order_id: Mapped[int | None] = mapped_column(BigInteger)
+
+    conviction: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False)
+    verdict: Mapped[str | None] = mapped_column(String(16))
+    risk_multiplier: Mapped[float | None] = mapped_column(Numeric(6, 3))
+    technical_strength: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    quality_strength: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    news_strength: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    momentum_strength: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    ml_strength: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    macro_strength: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    regime_strength: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    regime_code: Mapped[str | None] = mapped_column(String(16))
+    sector: Mapped[str | None] = mapped_column(String(60))
+
+    status: Mapped[str] = mapped_column(String(10), default="OPEN")
+    exit_date: Mapped[date | None] = mapped_column(Date)
+    exit_price: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    realized_pnl: Mapped[float | None] = mapped_column(Numeric(16, 2))
+    return_pct: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    hold_days: Mapped[int | None] = mapped_column(Integer)
+    exit_reason: Mapped[str | None] = mapped_column(String(40))
+
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
+                                                        server_default=func.now())
 
 
 class AiPrediction(Base):

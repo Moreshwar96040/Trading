@@ -51,9 +51,14 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./features/journal/journal-page.component').then((m) => m.JournalPageComponent),
   },
-  // AI Ideas was superseded by the Alpha Stack (same inputs, better output) —
-  // one scoring system, not two that disagree.
-  { path: 'ai', redirectTo: 'alpha' },
+  // The AI *Ideas* grid was retired — the Alpha Stack scores the same inputs
+  // better, and two competing scorers that disagree is worse than one. This page
+  // is the model-transparency view instead: predictions, accuracy and AI spend.
+  {
+    path: 'ai',
+    loadComponent: () =>
+      import('./features/ai/ai-page.component').then((m) => m.AiPageComponent),
+  },
   {
     path: 'alpha',
     loadComponent: () =>

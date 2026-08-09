@@ -82,6 +82,37 @@ public class RegimeController {
                 : marketData.getPortfolioHealthWithLive(live);
     }
 
+    /** GET /api/v1/exness/account — MT5 (Exness) FX/crypto account, open positions
+     *  and risk actions. Read-only; no order endpoints by design. */
+    @GetMapping("/exness/account")
+    public Map<String, Object> exnessAccount() {
+        return marketData.getExnessAccount();
+    }
+
+    /** GET /api/v1/autopilot/status — paper autopilot positions and realised
+     *  P&amp;L attributed by conviction band. Paper only. */
+    @GetMapping("/autopilot/status")
+    public Map<String, Object> autopilotStatus() {
+        return marketData.getAutopilotStatus();
+    }
+
+    /** GET /api/v1/conviction/calibration — per-layer IC, calibration curve and
+     *  suggested weights learned from the Alpha Stack's own recorded history. */
+    @GetMapping("/conviction/calibration")
+    public Map<String, Object> convictionCalibration(
+            @org.springframework.web.bind.annotation.RequestParam(
+                    defaultValue = "fwd_return_10d") String horizon) {
+        return marketData.getConvictionCalibration(horizon);
+    }
+
+    /** GET /api/v1/exness/trades?days=90 — closed FX/crypto trade analysis. */
+    @GetMapping("/exness/trades")
+    public Map<String, Object> exnessTrades(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "90")
+            int days) {
+        return marketData.getExnessTrades(days);
+    }
+
     /** GET /api/v1/portfolio/alpha-review — score each holding through the Alpha
      *  Stack and recommend ADD / HOLD / TRIM / SELL. Live Upstox holdings included
      *  when connected. Suggestions only — no orders are placed. */
