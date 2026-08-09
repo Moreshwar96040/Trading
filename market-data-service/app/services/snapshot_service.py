@@ -3,7 +3,7 @@
 Runs after each daily sync (scheduler) and on demand via the API.
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 from sqlalchemy import select
@@ -173,6 +173,100 @@ def compute_snapshot_row(df: pd.DataFrame) -> dict | None:
     }
 
 
+#: Columns mirrored from the snapshot into the append-only history (V21).
+HISTORY_COLUMNS = (
+    "close", "change_1d_pct", "volume", "avg_volume_20", "volume_ratio",
+    "sma_20", "sma_50", "sma_200", "ema_20", "rsi_14", "macd", "macd_signal",
+    "macd_hist", "bb_upper", "bb_lower", "atr_14", "high_52w", "low_52w",
+    "pct_from_52w_high", "pct_from_52w_low", "return_1m_pct", "return_3m_pct",
+    "return_1y_pct", "tenkan_9", "kijun_26", "cloud_top", "cloud_bottom",
+    "tk_cross_age_days", "pct_above_cloud", "ichimoku_bullish", "support",
+    "pct_from_support")
+
+
+def _append_history(session: Session, symbol_id: int, row: dict,
+                    source: str = "LIVE") -> None:
+    """Mirror a computed snapshot row into the append-only history.
+
+    `screener_snapshot` is overwritten every refresh (Spring maps it by symbol_id
+    alone), so without this the past is lost and no historical score can be
+    trusted. Idempotent per (symbol, date): re-running a day overwrites it rather
+    than duplicating.
+    """
+    from app.models import ScreenerSnapshotHistory
+    as_of = row.get("as_of_date")
+    if as_of is None or row.get("close") is None:
+        return
+    hist = (session.get(ScreenerSnapshotHistory, (symbol_id, as_of))
+            or ScreenerSnapshotHistory(symbol_id=symbol_id, as_of_date=as_of))
+    for column in HISTORY_COLUMNS:
+        if column in row:
+            setattr(hist, column, row[column])
+    hist.source = source
+    session.merge(hist)
+
+
+def backfill_snapshot_history(session: Session, days: int = 400,
+                              tickers: list[str] | None = None) -> dict:
+    """Reconstruct indicator history from stored prices.
+
+    This is possible *only* because every column in the history table is a pure
+    function of `ohlcv_daily`. For each past date we recompute the snapshot using
+    bars up to and including that date — never later ones — which is exactly the
+    guarantee the feature store depends on.
+
+    Fundamentals, news digests and ML predictions are NOT backfillable (they are
+    overwritten current-state), which is why the feature store flags them rather
+    than pretending.
+    """
+    from app.models import ScreenerSnapshotHistory, Symbol
+
+    stmt = select(Symbol).where(Symbol.active)
+    if tickers:
+        stmt = stmt.where(Symbol.ticker.in_([t.upper() for t in tickers]))
+    symbols = session.scalars(stmt).all()
+
+    written, skipped = 0, 0
+    for sym in symbols:
+        df = load_ohlcv(session, sym.id)
+        if len(df) < MIN_ROWS + 1:
+            skipped += 1
+            continue
+        existing = {d for (d,) in session.execute(
+            select(ScreenerSnapshotHistory.as_of_date)
+            .where(ScreenerSnapshotHistory.symbol_id == sym.id)).all()}
+
+        # Only walk the dates we actually want. Deciding the range BEFORE the loop
+        # matters: computing every day back to inception and discarding most of it
+        # is O(n^2) over the full history, which is minutes per symbol.
+        last_date = df["trade_date"].iloc[-1]
+        start_index = MIN_ROWS
+        if days:
+            cutoff = last_date - timedelta(days=days)
+            for idx in range(MIN_ROWS, len(df)):
+                if df["trade_date"].iloc[idx] >= cutoff:
+                    start_index = idx
+                    break
+            else:
+                start_index = len(df)
+
+        for end in range(start_index, len(df)):
+            as_of = df["trade_date"].iloc[end]
+            if as_of in existing:
+                continue
+            # Leading slice only — bars after `end` are invisible by construction.
+            row = compute_snapshot_row(df.iloc[: end + 1])
+            if row is None:
+                continue
+            _append_history(session, sym.id, row, source="BACKFILL")
+            written += 1
+        session.commit()
+
+    log.info("Snapshot history backfill: %d rows written, %d symbols skipped",
+             written, skipped)
+    return {"written": written, "symbols": len(symbols), "skipped": skipped}
+
+
 def refresh_snapshots(session: Session) -> dict:
     audit = SyncAudit(run_type="SNAPSHOT", status="RUNNING")
     session.add(audit)
@@ -187,6 +281,8 @@ def refresh_snapshots(session: Session) -> dict:
         snapshot = session.get(ScreenerSnapshot, sym.id) or ScreenerSnapshot(symbol_id=sym.id)
         for key, value in row.items():
             setattr(snapshot, key, value)
+        # Keep the point-in-time mirror in step with the overwritten "latest" row.
+        _append_history(session, sym.id, row, source="LIVE")
         fundamentals = session.get(Fundamentals, sym.id)
         for col in FUNDAMENTAL_COLUMNS:
             setattr(snapshot, col, getattr(fundamentals, col) if fundamentals else None)

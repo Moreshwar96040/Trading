@@ -304,6 +304,22 @@ export interface AlphaSetup {
   strategies: { id: number; name: string }[];
   has_live_signal?: boolean;
   conviction: number;
+  /** How SURE we are of the conviction estimate (0–1), as distinct from how good
+   *  the setup looks. Drives size; conviction drives ranking. */
+  confidence?: number;
+  /** 1 = layers agree, 0 = the score is the average of a fight. */
+  consensus?: number;
+  dispersion?: number;
+  regime_support?: number;
+  conflicts?: { bullish_layer: string; bullish_strength: number;
+                bearish_layer: string; bearish_strength: number; note: string }[];
+  /** Deterministic explanation derived from the arithmetic — never LLM-invented. */
+  rationale?: {
+    headline: string; verdict: string; conviction: number; confidence: number;
+    drivers: string[]; detractors: string[]; conflicts: string[];
+    confidence_notes: string[]; veto_reason: string | null;
+    action_hint: string | null;
+  };
   risk_multiplier: number;
   /** Sizing detail: base multiplier tilted by volatility (inverse-ATR) and a
    *  data-completeness haircut. `size_note` explains the arithmetic. */

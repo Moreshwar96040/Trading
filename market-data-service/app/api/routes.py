@@ -491,6 +491,46 @@ def ai_usage(session: Session = Depends(get_session),
             "usd_to_inr": settings.usd_to_inr}
 
 
+@router.post("/internal/features/backfill")
+def features_backfill(days: int = 400, body: dict | None = None,
+                      session: Session = Depends(get_session)) -> dict:
+    """Reconstruct indicator history from stored prices so past dates become
+    scoreable. Safe to re-run — existing (symbol, date) rows are skipped."""
+    from app.services.snapshot_service import backfill_snapshot_history
+    body = body or {}
+    return backfill_snapshot_history(session, days=days, tickers=body.get("tickers"))
+
+
+@router.get("/internal/features/{ticker}")
+def features_for(ticker: str, as_of: str | None = None,
+                 session: Session = Depends(get_session)) -> dict:
+    """The point-in-time feature vector behind a score — the audit view.
+    Shows exactly what was knowable on a date, and which fields are degraded."""
+    from dataclasses import asdict
+    from datetime import date as _date
+
+    from app.features import get_features
+
+    sym = _get_symbol(session, ticker)
+    when = None
+    if as_of:
+        try:
+            when = _date.fromisoformat(as_of)
+        except ValueError as exc:
+            raise HTTPException(status_code=400,
+                                detail="as_of must be YYYY-MM-DD") from exc
+    vector = get_features(session, sym.id, when)
+    if vector is None:
+        raise HTTPException(status_code=404,
+                            detail=f"No point-in-time features for {sym.ticker} "
+                                   f"on or before {as_of or 'the latest date'}. "
+                                   "Run POST /internal/features/backfill.")
+    payload = asdict(vector)
+    payload["sector"] = payload.pop("_sector", None)
+    payload["completeness"] = vector.completeness()
+    return payload
+
+
 @router.post("/internal/conviction/record")
 def conviction_record(session: Session = Depends(get_session),
                       settings: Settings = Depends(get_settings)) -> dict:

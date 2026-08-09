@@ -247,6 +247,61 @@ class Alert(Base):
     triggered_value: Mapped[float | None] = mapped_column(Numeric(18, 4))
 
 
+class ScreenerSnapshotHistory(Base):
+    """Append-only indicator history (V21) — the point-in-time source of truth.
+
+    `screener_snapshot` keeps only the latest row per symbol (and Spring maps it
+    with @Id symbolId, so its PK can't change). This mirror keeps every day, which
+    is what makes historical scoring and honest backtests possible.
+
+    Every column here is a pure function of ohlcv_daily, so unlike news digests or
+    regime, this history can be reconstructed retroactively.
+    """
+    __tablename__ = "screener_snapshot_history"
+
+    symbol_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("symbols.id", ondelete="CASCADE"),
+                                           primary_key=True)
+    as_of_date: Mapped[date] = mapped_column(Date, primary_key=True)
+
+    close: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    change_1d_pct: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    volume: Mapped[int | None] = mapped_column(BigInteger)
+    avg_volume_20: Mapped[float | None] = mapped_column(Numeric(18, 2))
+    volume_ratio: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    sma_20: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    sma_50: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    sma_200: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    ema_20: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    rsi_14: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    macd: Mapped[float | None] = mapped_column(Numeric(14, 6))
+    macd_signal: Mapped[float | None] = mapped_column(Numeric(14, 6))
+    macd_hist: Mapped[float | None] = mapped_column(Numeric(14, 6))
+    bb_upper: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    bb_lower: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    atr_14: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    high_52w: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    low_52w: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    pct_from_52w_high: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    pct_from_52w_low: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    return_1m_pct: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    return_3m_pct: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    return_1y_pct: Mapped[float | None] = mapped_column(Numeric(10, 4))
+
+    tenkan_9: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    kijun_26: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    cloud_top: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    cloud_bottom: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    tk_cross_age_days: Mapped[float | None] = mapped_column(Numeric(6, 0))
+    pct_above_cloud: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    ichimoku_bullish: Mapped[float | None] = mapped_column(Numeric(1, 0))
+    support: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    pct_from_support: Mapped[float | None] = mapped_column(Numeric(10, 4))
+
+    source: Mapped[str] = mapped_column(String(10), default="LIVE")
+    recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
+                                                         server_default=func.now())
+
+
 class ConvictionHistory(Base):
     """One scored setup on one day + its eventual forward return (V19).
 
