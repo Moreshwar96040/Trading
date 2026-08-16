@@ -9,7 +9,8 @@ import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterLink } from '@angular/router';
 
-import { AiPredictionRow, AiUsageSummary, AutopilotStatus,
+import { AdaptationHistory, AdaptationRun,
+         AiPredictionRow, AiUsageSummary, AutopilotStatus,
          CircuitBreakerReport,
          ConvictionCalibration, RegimeWeights, ShadowBoard,
          WeightProposal } from '../../core/models/market-data.models';
@@ -462,6 +463,111 @@ const GOOD_ACCURACY = 55;
       }
     }
 
+    <!-- ============ self-adjustment: what the system does on its own ======= -->
+    @if (adaptation(); as a) {
+      <h3 class="cal-header">Self-adjustment
+        <span class="muted">· the Alpha Stack retuning itself, within your bounds</span></h3>
+
+      <p class="muted small">
+        Weights are chosen by market condition. A regime with no model of its own
+        uses the global set — it only diverges once its own data justifies it.
+        Automatic changes may move any layer at most 10 points from the baseline
+        you approved, may not switch a layer off, and can never touch the news veto.
+      </p>
+
+      <div class="scopes">
+        @for (s of a.scopes; track s.scope) {
+          <mat-card appearance="outlined" class="scope"
+                    [class.live]="s.scope === liveScope()">
+            <div class="shead">
+              <b>{{ scopeLabel(s.scope) }}</b>
+              @if (s.scope === liveScope()) { <span class="pill ahead">Live now</span> }
+              @if (s.is_anchor) {
+                <span class="pill" matTooltip="These are the weights you approved.">
+                  Your baseline</span>
+              } @else {
+                <span class="pill" matTooltip="Automatically tuned within your bounds.">
+                  Auto-tuned</span>
+              }
+            </div>
+            <div class="chips">
+              @for (layer of layerOrder; track layer) {
+                <span class="wchip"><b>{{ layerLabel(layer) }}</b>
+                  {{ s.weights[layer] }}</span>
+              }
+            </div>
+            <p class="muted small">
+              {{ s.label }}
+              @if (s.cooldown_days_left) {
+                · locked for {{ s.cooldown_days_left }} more day(s)
+              }
+            </p>
+            @if (!s.is_anchor) {
+              <button mat-button (click)="revert(s.scope)" [disabled]="adapting()">
+                <mat-icon>restore</mat-icon> Revert to my baseline
+              </button>
+            }
+          </mat-card>
+        }
+      </div>
+
+      <div class="propose-row">
+        <button mat-stroked-button (click)="adapt(true)" [disabled]="adapting()">
+          <mat-icon>visibility</mat-icon> Preview what it would change
+        </button>
+        <button mat-stroked-button color="primary" (click)="adapt(false)"
+                [disabled]="adapting()">
+          <mat-icon>autorenew</mat-icon> Run adaptation now
+        </button>
+        <span class="muted small">Runs automatically every Sunday when
+          AUTO_ADAPT_ENABLED is on. A preview changes nothing at all.</span>
+      </div>
+
+      @if (adaptRun(); as r) {
+        <mat-card appearance="outlined" class="verdict"
+                  [class.ok]="r.status === 'OK'" [class.no]="r.status !== 'OK'">
+          <mat-icon>{{ r.status === 'OK' ? 'insights' : 'info' }}</mat-icon>
+          <div>
+            <p class="vsum"><b>
+              @if (r.status !== 'OK') { {{ r.status }} }
+              @else if (r.dry_run) { Preview — nothing was changed }
+              @else { {{ r.promoted }} scope(s) updated }
+            </b></p>
+            @if (r.note) { <p class="muted small">{{ r.note }}</p> }
+          </div>
+        </mat-card>
+        @if (r.scopes?.length) {
+          <ul class="gates">
+            @for (s of r.scopes; track s.scope) {
+              <li [class.pass]="s.action === 'PROMOTED' || s.action === 'WOULD_PROMOTE'"
+                  [class.fail]="s.action === 'REJECTED' || s.action === 'WOULD_REJECT'">
+                <mat-icon>{{ adaptIcon(s.action) }}</mat-icon>
+                <b>{{ scopeLabel(s.scope) }}</b>
+                <span class="muted">{{ s.reason || s.summary }}</span>
+              </li>
+            }
+          </ul>
+        }
+      }
+
+      @if (a.events.length) {
+        <h4>Change log</h4>
+        <p class="muted small">Every decision, including the decisions to do
+          nothing — otherwise "why hasn't it adapted?" is unanswerable.</p>
+        <ul class="events">
+          @for (e of a.events; track e.id) {
+            <li>
+              <span class="pill" [class.ahead]="e.action === 'PROMOTED'"
+                    [class.behind]="e.action === 'ROLLED_BACK'">{{ e.action }}</span>
+              <b>{{ scopeLabel(e.scope) }}</b>
+              <span class="muted">{{ e.reason }}</span>
+              <span class="muted when">{{ e.occurred_at | date: 'short' }}</span>
+            </li>
+          }
+        </ul>
+      }
+    }
+
     <!-- ============ circuit breakers ============ -->
     @if (breakers(); as b) {
       <h3 class="cal-header">Circuit breakers
@@ -670,6 +776,19 @@ const GOOD_ACCURACY = 55;
     .pill.ahead { background: rgba(38,166,154,0.15); color: var(--up); }
     .pill.behind { background: rgba(239,83,80,0.15); color: var(--down); }
     .hint { margin-left: 10px; }
+    .scopes { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+              gap: 12px; margin: 12px 0; }
+    .scope { padding: 14px 16px; }
+    .scope.live { border-color: var(--accent); }
+    .scope p { margin: 6px 0 4px; }
+    .shead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+             margin-bottom: 8px; }
+    .events { list-style: none; padding: 0; margin: 8px 0 0;
+              display: flex; flex-direction: column; gap: 8px; }
+    .events li { display: flex; align-items: baseline; gap: 10px; font-size: 12.5px;
+                 flex-wrap: wrap; padding-bottom: 8px;
+                 border-bottom: 1px solid var(--border); }
+    .events .when { margin-left: auto; white-space: nowrap; }
   `,
 })
 export class AiPageComponent implements OnInit {
@@ -695,9 +814,15 @@ export class AiPageComponent implements OnInit {
   readonly regimeWeights = signal<RegimeWeights | null>(null);
   readonly breakers = signal<CircuitBreakerReport | null>(null);
   readonly shadowBoard = signal<ShadowBoard | null>(null);
+  readonly adaptation = signal<AdaptationHistory | null>(null);
+  readonly adaptRun = signal<AdaptationRun | null>(null);
   readonly training = signal(false);
   readonly proposing = signal(false);
   readonly promoting = signal(false);
+  readonly adapting = signal(false);
+
+  /** Which weight scope today's regime is actually using. */
+  readonly liveScope = computed(() => this.adaptation()?.current_scope ?? 'global');
 
   readonly layerOrder = ['technical', 'quality', 'news', 'momentum',
                          'ml', 'macro', 'regime'];
@@ -723,6 +848,67 @@ export class AiPageComponent implements OnInit {
     this.loadAutopilot();
     this.loadRegimeWeights();
     this.loadGovernance();
+    this.loadAdaptation();
+  }
+
+  private loadAdaptation(): void {
+    this.api.getAdaptationHistory().subscribe({
+      next: (a) => this.adaptation.set(a),
+      error: () => this.adaptation.set(null),    // additive panel — fail quietly
+    });
+  }
+
+  /** Trigger a tuning cycle. `preview` runs it with nothing persisted. */
+  adapt(preview: boolean): void {
+    this.adapting.set(true);
+    this.api.runAdaptation(preview).subscribe({
+      next: (r) => {
+        this.adapting.set(false);
+        this.adaptRun.set(r);
+        this.snackBar.open(
+          r.status !== 'OK' ? (r.note ?? r.status)
+            : preview ? 'Preview complete — nothing changed'
+            : `${r.promoted} scope(s) updated`,
+          undefined, { duration: 5000 });
+        if (!preview) { this.loadAdaptation(); this.loadGovernance(); }
+      },
+      error: () => {
+        this.adapting.set(false);
+        this.snackBar.open('Adaptation failed', 'Dismiss', { duration: 4000 });
+      },
+    });
+  }
+
+  /** The panic button: discard every automatic change in one step. */
+  revert(scope: string): void {
+    const actor = window.prompt(
+      `Revert ${this.scopeLabel(scope)} to the weights you approved?\n\nYour name:`);
+    if (!actor?.trim()) return;
+    this.adapting.set(true);
+    this.api.revertToAnchor(actor.trim(), scope).subscribe({
+      next: () => {
+        this.adapting.set(false);
+        this.snackBar.open('Reverted to your baseline', undefined,
+                           { duration: 4000 });
+        this.loadAdaptation();
+      },
+      error: () => {
+        this.adapting.set(false);
+        this.snackBar.open('Revert failed', 'Dismiss', { duration: 4000 });
+      },
+    });
+  }
+
+  scopeLabel(scope: string): string {
+    return { global: 'All conditions (global)', risk_on: 'Risk-on markets',
+             neutral: 'Neutral / choppy markets',
+             risk_off: 'Risk-off markets' }[scope] ?? scope;
+  }
+
+  adaptIcon(action: string): string {
+    return { PROMOTED: 'check_circle', WOULD_PROMOTE: 'task_alt',
+             REJECTED: 'cancel', WOULD_REJECT: 'block',
+             SKIPPED: 'schedule', ROLLED_BACK: 'undo' }[action] ?? 'info';
   }
 
   private loadGovernance(): void {

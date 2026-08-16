@@ -5,6 +5,7 @@ import { shareReplay } from 'rxjs/operators';
 
 import { environment } from '../../../environments/environment';
 import {
+  AdaptationHistory, AdaptationRun,
   AiPredictionRow, AiRiskPlan, AiUsageSummary, AlertInfo, AlphaStack, AutopilotStatus,
   BacktestDetail,
   BacktestRunParams, CandleSeries,
@@ -286,6 +287,25 @@ export class MarketDataService {
   getRegimeWeights(horizon = 'fwd_return_10d'): Observable<RegimeWeights> {
     return this.http.get<RegimeWeights>(`${this.base}/conviction/regime-weights`,
                                         { params: { horizon } });
+  }
+
+  /** Let the Alpha Stack retune itself. `dryRun` reports without changing. */
+  runAdaptation(dryRun = false): Observable<AdaptationRun> {
+    return this.http.post<AdaptationRun>(`${this.base}/adapt/run`, null,
+                                         { params: { dryRun } });
+  }
+
+  /** What the system changed about itself, and what governs each regime. */
+  getAdaptationHistory(limit = 50): Observable<AdaptationHistory> {
+    return this.http.get<AdaptationHistory>(`${this.base}/adapt/history`,
+                                            { params: { limit } });
+  }
+
+  /** Discard automatic changes; return a scope to the baseline you approved. */
+  revertToAnchor(actor: string, scope: string,
+                 reason?: string): Observable<Record<string, unknown>> {
+    return this.http.post<Record<string, unknown>>(
+      `${this.base}/adapt/revert`, { actor, scope, reason });
   }
 
   /** Challengers replayed against the champion — the promotion decision screen. */

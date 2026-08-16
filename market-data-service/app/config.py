@@ -69,6 +69,16 @@ class Settings(BaseSettings):
     # Spring owns the paper book; the autopilot places orders through its API.
     backend_base_url: str = "http://localhost:8080"
 
+    # --- autonomous weight adaptation (the Alpha Stack tuning itself) ---
+    # OFF by default. When enabled, the weekly job may refit and promote weights
+    # WITHOUT human approval — bounded by the drift cap (no layer moves more than
+    # 10 points from your last approved baseline, none is switched off), the five
+    # validation gates, a shadow replay, and a 14-day cooldown per scope. The
+    # news veto is never learnable. Every outcome is recorded in
+    # adaptation_events, and auto-rollback reverts a failing automatic model to
+    # your baseline. Turn on only once you have several hundred labelled setups.
+    auto_adapt_enabled: bool = False
+
     # --- scheduler ---
     scheduler_enabled: bool = True
     sync_cron: str = "30 18 * * 1-5"        # post-market IST, weekdays

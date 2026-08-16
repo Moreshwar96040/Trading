@@ -508,6 +508,48 @@ def conviction_regime_weights(horizon: str = "fwd_return_10d",
     return learn_regime_weights(session, horizon=horizon)
 
 
+@router.post("/internal/adapt/run")
+def adapt_run(dry_run: bool = False, session: Session = Depends(get_session),
+              settings: Settings = Depends(get_settings)) -> dict:
+    """Let the Alpha Stack adjust its own weights, within the approved bounds.
+
+    `dry_run=true` reports what it *would* do and changes nothing — the right way
+    to inspect the loop before enabling it.
+    """
+    from app.services.auto_adapt import run_auto_adaptation
+    return run_auto_adaptation(session, settings, dry_run=dry_run)
+
+
+@router.get("/internal/adapt/history")
+def adapt_history(limit: int = 50, session: Session = Depends(get_session)) -> dict:
+    """What the system changed about itself, why, and what is live per regime."""
+    from app.services.auto_adapt import adaptation_history
+    return adaptation_history(session, limit=min(max(limit, 1), 200))
+
+
+@router.post("/internal/adapt/revert")
+def adapt_revert(body: dict | None = None,
+                 session: Session = Depends(get_session)) -> dict:
+    """Discard automatic changes and return a scope to your approved baseline."""
+    from app.services.model_registry import SCOPES, revert_to_anchor
+    body = body or {}
+    actor = (body.get("actor") or "").strip()
+    if not actor:
+        raise HTTPException(status_code=400, detail="actor is required.")
+    scope = body.get("scope") or "global"
+    if scope not in SCOPES:
+        raise HTTPException(status_code=400,
+                            detail=f"scope must be one of {sorted(SCOPES)}")
+    return revert_to_anchor(session, actor, scope=scope, reason=body.get("reason"))
+
+
+@router.post("/internal/adapt/auto-rollback")
+def adapt_auto_rollback(session: Session = Depends(get_session)) -> dict:
+    """Revert any learner-promoted model that is failing on probation."""
+    from app.services.circuit_breakers import auto_rollback_if_failing
+    return auto_rollback_if_failing(session)
+
+
 @router.get("/internal/shadow/board")
 def shadow_board_endpoint(horizon: str = "fwd_return_10d",
                           session: Session = Depends(get_session)) -> dict:

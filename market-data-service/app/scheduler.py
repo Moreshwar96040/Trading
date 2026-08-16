@@ -58,6 +58,18 @@ def _run_sync_job() -> None:
                          closed["closed"])
         except Exception:                      # noqa: BLE001
             log.exception("Autopilot run failed (sync itself succeeded)")
+
+        # Auto-rollback runs DAILY even though adaptation is weekly: an automatic
+        # model that has stopped working should not survive until the next
+        # adaptation window just because that is when we happened to look.
+        try:
+            from app.services.circuit_breakers import auto_rollback_if_failing
+            out = auto_rollback_if_failing(session)
+            if out["reverted"]:
+                log.warning("Auto-rollback reverted %d scope(s): %s",
+                            len(out["reverted"]), out["reverted"])
+        except Exception:                      # noqa: BLE001
+            log.exception("Auto-rollback check failed (sync itself succeeded)")
     except Exception:
         log.exception("Scheduled sync crashed")
     finally:
@@ -78,6 +90,32 @@ def _run_fundamentals_job() -> None:
                  summary["symbols_updated"])
     except Exception:
         log.exception("Scheduled fundamentals refresh crashed")
+    finally:
+        session.close()
+
+
+def _run_adaptation_job() -> None:
+    """Weekly: let the Alpha Stack retune itself within the approved bounds.
+
+    Weekly rather than daily on purpose. Forward returns take ten trading days to
+    mature, so a daily refit would mostly re-fit the same data and produce a chain
+    of promotions chasing noise. The per-scope cooldown is the harder guarantee;
+    the weekly cadence just avoids the pointless work.
+    """
+    from app.services.auto_adapt import run_auto_adaptation
+    settings = get_settings()
+    session = session_factory()()
+    try:
+        out = run_auto_adaptation(session, settings)
+        if out.get("status") == "OK":
+            log.info("Auto-adaptation: %d scope(s) promoted", out["promoted"])
+            for scope in out["scopes"]:
+                log.info("  %s: %s — %s", scope["scope"], scope["action"],
+                         scope.get("reason") or scope.get("summary", ""))
+        else:
+            log.info("Auto-adaptation: %s", out.get("note"))
+    except Exception:
+        log.exception("Auto-adaptation crashed")
     finally:
         session.close()
 
@@ -122,8 +160,14 @@ def start_scheduler() -> BackgroundScheduler | None:
                       CronTrigger.from_crontab(settings.briefing_cron,
                                                timezone=settings.timezone),
                       id="morning_briefing", replace_existing=True)
+    # Sunday 06:00 — after the week's outcomes have been labelled, before Monday.
+    scheduler.add_job(_run_adaptation_job,
+                      CronTrigger.from_crontab("0 6 * * SUN",
+                                               timezone=settings.timezone),
+                      id="weekly_adaptation", replace_existing=True)
     scheduler.start()
-    log.info("Scheduler started: daily sync '%s', fundamentals '%s', briefing '%s' (%s)",
+    log.info("Scheduler started: daily sync '%s', fundamentals '%s', briefing '%s', "
+             "adaptation weekly (auto-adapt %s) (%s)",
              settings.sync_cron, settings.fundamentals_cron, settings.briefing_cron,
-             settings.timezone)
+             "ON" if settings.auto_adapt_enabled else "off", settings.timezone)
     return scheduler

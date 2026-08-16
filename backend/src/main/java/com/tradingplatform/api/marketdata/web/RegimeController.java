@@ -125,6 +125,30 @@ public class RegimeController {
         return marketData.getRegimeWeights(horizon);
     }
 
+    /** POST /api/v1/adapt/run — let the Alpha Stack retune itself. Use
+     *  dryRun=true to see what it would do without changing anything. */
+    @org.springframework.web.bind.annotation.PostMapping("/adapt/run")
+    public Map<String, Object> runAdaptation(
+            @org.springframework.web.bind.annotation.RequestParam(
+                    defaultValue = "false") boolean dryRun) {
+        return marketData.runAdaptation(dryRun);
+    }
+
+    /** GET /api/v1/adapt/history — what changed, why, and what is live per regime. */
+    @GetMapping("/adapt/history")
+    public Map<String, Object> adaptationHistory(
+            @org.springframework.web.bind.annotation.RequestParam(
+                    defaultValue = "50") int limit) {
+        return marketData.getAdaptationHistory(limit);
+    }
+
+    /** POST /api/v1/adapt/revert — return a scope to the human-approved baseline. */
+    @org.springframework.web.bind.annotation.PostMapping("/adapt/revert")
+    public Map<String, Object> revertToAnchor(
+            @org.springframework.web.bind.annotation.RequestBody Map<String, Object> body) {
+        return marketData.revertToAnchor(body);
+    }
+
     /** GET /api/v1/models/shadow-board — challengers replayed against the champion. */
     @GetMapping("/models/shadow-board")
     public Map<String, Object> shadowBoard(

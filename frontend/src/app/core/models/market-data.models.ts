@@ -554,6 +554,49 @@ export interface RegimeWeights {
               weights: { layer: string; weight: number; drift: number }[] }[];
 }
 
+/** What the Alpha Stack changed about itself, and what governs each regime. */
+export interface AdaptationScope {
+  scope: 'global' | 'risk_on' | 'neutral' | 'risk_off';
+  label: string;
+  weights: Record<string, number>;
+  version_id: number | null;
+  anchor_label: string | null;
+  is_anchor: boolean;
+  cooldown_days_left: number | null;
+}
+
+export interface AdaptationEvent {
+  id: number;
+  scope: string;
+  action: 'PROMOTED' | 'REJECTED' | 'SKIPPED' | 'ROLLED_BACK';
+  reason: string;
+  occurred_at: string | null;
+  samples: number | null;
+  oos_ic: number | null;
+  max_drift: number | null;
+  weights: Record<string, number> | null;
+  gates: { gate: string; passed: boolean; reason: string }[] | null;
+  triggered_by: string;
+}
+
+export interface AdaptationHistory {
+  scopes: AdaptationScope[];
+  events: AdaptationEvent[];
+  regime_code: string | null;
+  current_scope: string;
+  note?: string;
+}
+
+export interface AdaptationRun {
+  status: 'OK' | 'DISABLED' | 'HALTED';
+  dry_run?: boolean;
+  promoted?: number;
+  note?: string;
+  scopes?: { scope: string; action: string; reason?: string; summary?: string;
+             n?: number; max_drift?: number | null;
+             candidate?: Record<string, number>; failed?: string[] }[];
+}
+
 /** One challenger replayed against the champion on identical history. */
 export interface ShadowResult {
   status: 'OK' | 'NOT_FOUND' | 'UNSUPPORTED' | 'IS_CHAMPION';

@@ -316,6 +316,43 @@ public class MarketDataServiceClient {
         }
     }
 
+    /** Let the Alpha Stack retune itself within the approved bounds. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> runAdaptation(boolean dryRun) {
+        try {
+            return http.post()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/adapt/run")
+                            .queryParam("dry_run", dryRun).build())
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Adaptation service unavailable", ex);
+        }
+    }
+
+    /** What the system changed about itself, and what is live per regime. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getAdaptationHistory(int limit) {
+        try {
+            return http.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/adapt/history")
+                            .queryParam("limit", limit).build())
+                    .retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Adaptation history unavailable", ex);
+        }
+    }
+
+    /** Discard automatic changes and return a scope to the approved baseline. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> revertToAnchor(Map<String, Object> body) {
+        try {
+            return http.post().uri("/internal/adapt/revert")
+                    .body(body).retrieve().body(Map.class);
+        } catch (RestClientException ex) {
+            throw new UpstreamException("Revert unavailable", ex);
+        }
+    }
+
     /** Every shadow challenger replayed against the live champion. */
     @SuppressWarnings("unchecked")
     public Map<String, Object> getShadowBoard(String horizon) {

@@ -593,3 +593,83 @@ traced to one named check is not an explanation.
 * **No live trading.** The autopilot is paper-only; there is no live code path.
 * **No forward shadow recording** for non-weight challengers — needed before the
   first challenger that changes a layer's computation.
+
+---
+
+## Part 8 — Phase 5: autonomous, regime-conditional adaptation
+
+The Alpha Stack now adjusts its own weights, and chooses them by market
+condition. This is the capability the original brief asked for, and it was the
+one thing genuinely missing after Phase 4.
+
+### What changed
+
+| Piece | Where |
+| --- | --- |
+| Regime-scoped weight registry (one champion per scope) | migration V23, `model_registry.py` |
+| Live scoring picks weights by today's regime | `conviction_service.py::alpha_stack` |
+| Drift guard bounded to the human anchor | `app/ai/gates.py::gate_drift_bounded` |
+| Frozen safety parameters | `app/ai/gates.py::gate_frozen_params_untouched` |
+| Autonomous adaptation loop | `app/services/auto_adapt.py` |
+| Auto-rollback of a failing automatic model | `circuit_breakers.py::auto_rollback_if_failing` |
+| Weekly scheduler job (Sunday 06:00) | `scheduler.py::_run_adaptation_job` |
+| Self-adjustment UI + change log | `frontend/.../ai-page.component.ts` |
+
+### How a change happens now
+
+1. Weekly, per scope (global, risk_on, neutral, risk_off).
+2. Circuit breakers must be clear — no learning from a period already flagged broken.
+3. Refit on that scope's own labelled history (>= 200 rows).
+4. Seven gates: sample size, OOS IC, turnover, sign flip, stability, **drift
+   bound**, **frozen params**.
+5. Shadow replay must beat the live champion by >= 0.005 IC on identical history.
+6. Promote — automatically, no human — and log why.
+7. Daily, auto-rollback reverts a learner-promoted champion whose rolling IC has
+   collapsed, back to the last human-approved set.
+
+### The bound that matters most: anchoring
+
+Drift is measured from the last **human-approved** weight set, never from the
+incumbent. This is the difference between a bound and the appearance of one.
+Against the incumbent, ten automatic promotions of +9 points each are each
+individually legal and collectively land 90 points from anything anyone reviewed.
+Against the anchor, the *total* is capped. Automatic promotions deliberately do
+not re-anchor; only a human promotion does.
+
+Concretely: no layer may move more than 10 points from your baseline, none may
+fall below 2 points, and the news veto is not a weight and is not learnable — a
+rule whose value comes from being non-negotiable must not be negotiable.
+
+### A real bug this phase surfaced
+
+The stability gate originally judged each layer by coefficient of variation
+alone. On seven layers where several carry little weight, the smallest, noisiest
+layer always has a huge CV — so the gate would have blocked essentially every
+promotion in production. That is not caution; it is paralysis wearing caution's
+clothes, and it would have looked like "the system never adapts" rather than like
+a bug.
+
+Fixed by requiring instability to be both proportional *and* material: a layer
+fails only if its CV exceeds 20% **and** it moves more than 4 weight points.
+A 5-point layer wobbling +/-1.5 points no longer vetoes a good fit; a 25-point
+layer swinging +/-12 still does.
+
+### What is still true
+
+* **Paper only.** No live trading path exists.
+* **Off by default.** `AUTO_ADAPT_ENABLED=false`.
+* **Every outcome is logged**, including the decisions to do nothing — otherwise
+  "why hasn't it adapted?" is unanswerable.
+* **One-step revert.** However many automatic changes have accumulated,
+  `revert_to_anchor` returns a scope to your weights in a single call.
+* **Your promotions are never overridden.** Auto-rollback only reverts models the
+  learner promoted. If you promoted something and it is losing, reversing it is
+  your call.
+
+### The honest limitation
+
+None of this makes the learner *correct*. It makes it bounded, reversible and
+legible. Those are achievable by engineering; correctness is decided by whether
+the seven layers predict anything, which only real forward data can answer. If
+the conviction IC sits near zero after six months, the right conclusion is that
+the layers do not predict — and no amount of adaptive reweighting will rescue that.

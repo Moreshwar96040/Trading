@@ -362,11 +362,16 @@ def alpha_stack(session: Session, ticker: str | None = None,
     regime_code = regime.get("regime") if regime.get("status") == "OK" else None
 
     from app.services.market_news_service import cached_macro_sentiment
-    from app.services.model_registry import champion_weights
+    from app.services.model_registry import weights_for_regime
 
     # Weights come from the registry, not from an import — that indirection is
     # what makes champion/challenger and reproducible attribution possible.
-    weights = champion_weights(session)
+    #
+    # They are also selected by today's regime (V23): the market condition now
+    # changes *how much each layer counts*, not merely the layers' own values.
+    # A regime with no champion of its own falls back to global, so a scope only
+    # diverges once it has earned the right to.
+    weights = weights_for_regime(session, regime_code)
 
     if ticker and settings is not None:
         from app.services.news_sentiment_service import warm_macro

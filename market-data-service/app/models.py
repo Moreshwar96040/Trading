@@ -262,6 +262,13 @@ class ModelVersion(Base):
     params_json: Mapped[dict] = mapped_column(JSON, nullable=False)
     metrics_json: Mapped[dict | None] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(10), default="SHADOW")
+    #: Which market condition this set governs (V23). 'global' is the fallback
+    #: used whenever a regime bucket has no champion of its own.
+    scope: Mapped[str] = mapped_column(String(16), default="global")
+    #: True when a human approved this set. Drift is always measured from the
+    #: latest anchor, never from the incumbent — otherwise automatic promotions
+    #: ratchet: each step within bounds, the total arbitrarily far.
+    is_anchor: Mapped[bool] = mapped_column(Boolean, default=False)
     parent_id: Mapped[int | None] = mapped_column(BigInteger,
                                                   ForeignKey("model_versions.id"))
     notes: Mapped[str | None] = mapped_column(String(500))
@@ -287,6 +294,35 @@ class ModelVersionAudit(Base):
     reason: Mapped[str | None] = mapped_column(String(300))
     occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
                                                          server_default=func.now())
+
+
+class AdaptationEvent(Base):
+    """Why the system changed itself, or declined to (V23).
+
+    `model_version_audit` records that a status changed. This records the
+    reasoning behind it — the gate verdicts, the drift measured, what it was
+    compared against. Under full autonomy this table is the only thing standing
+    between "the model adapted" and "the model did something, unclear what".
+    """
+    __tablename__ = "adaptation_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
+                                                         server_default=func.now())
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+    action: Mapped[str] = mapped_column(String(24), nullable=False)
+    version_id: Mapped[int | None] = mapped_column(BigInteger,
+                                                   ForeignKey("model_versions.id"))
+    anchor_id: Mapped[int | None] = mapped_column(BigInteger,
+                                                  ForeignKey("model_versions.id"))
+    samples: Mapped[int | None] = mapped_column(Integer)
+    oos_ic: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    champion_ic: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    max_drift: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    gates_json: Mapped[dict | None] = mapped_column(JSON)
+    weights_json: Mapped[dict | None] = mapped_column(JSON)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    triggered_by: Mapped[str] = mapped_column(String(60), default="learner")
 
 
 class ScreenerSnapshotHistory(Base):
